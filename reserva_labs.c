@@ -80,24 +80,18 @@ typedef struct {
 
 /* Remove os espaços do início e do fim de um texto. */
 void aparar(char *texto) {
-    int inicio = 0;
-    int i = 0;
+    char *inicio = texto;
+    char *fim;
 
-    /* isspace espera um unsigned char. */
-    while (isspace((unsigned char)texto[inicio])) {
+    while (isspace((unsigned char)*inicio)) {
         inicio++;
     }
-    while (texto[inicio] != '\0') {
-        texto[i] = texto[inicio];
-        i++;
-        inicio++;
+    fim = inicio + strlen(inicio);
+    while (fim > inicio && isspace((unsigned char)fim[-1])) {
+        fim--;
     }
-    texto[i] = '\0';
-
-    while (i > 0 && isspace((unsigned char)texto[i - 1])) {
-        i--;
-        texto[i] = '\0';
-    }
+    *fim = '\0';
+    memmove(texto, inicio, (size_t)(fim - inicio) + 1);
 }
 
 /* Devolve 0 quando a linha nao cabe no campo informado. */
@@ -1347,13 +1341,15 @@ void exibirRelatorio(Sistema *s) {
             continue;
         }
         confirmadas++;
-        for (int j = 0; j < s->info.qtdLabs; j++) {
-            if (s->labs[j].id == r->idLaboratorio) {
-                minutos[j] += r->fimMin - r->inicioMin;
-            }
+        int posLab = buscarLab(s, r->idLaboratorio);
+        if (posLab != -1) {
+            minutos[posLab] += r->fimMin - r->inicioMin;
         }
-        for (int j = 0; j < s->info.qtdEquips; j++) {
-            unidades[j] += qtdNaReserva(r, s->equips[j].id);
+        for (int j = 0; j < r->qtdItens; j++) {
+            int posEquip = buscarEquip(s, r->itens[j].idEquipamento);
+            if (posEquip != -1) {
+                unidades[posEquip] += r->itens[j].quantidade;
+            }
         }
     }
 
@@ -1457,19 +1453,13 @@ void menuConsultas(Sistema *s) {
 }
 
 int main(void) {
-    Sistema s;
+    Sistema s = {0};
     int executando = 1;
 
     s.info.assinatura = ASSINATURA_ARQUIVO;
     s.info.proximoLab = 1;
     s.info.proximoEquip = 1;
     s.info.proximoReserva = 1;
-    s.info.qtdLabs = 0;
-    s.info.qtdEquips = 0;
-    s.info.qtdReservas = 0;
-    s.labs = NULL;
-    s.equips = NULL;
-    s.reservas = NULL;
 
     if (!carregarDados(&s)) {
         cadastrarDadosIniciais(&s);
