@@ -3,6 +3,7 @@
 */
 
 #include <ctype.h>
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -400,7 +401,19 @@ int carregarDados(Sistema *s) {
     long tamanhoArquivo;
 
     if (f == NULL) {
-        return 0;
+        if (errno != ENOENT) {
+            printf("Nao foi possivel abrir o arquivo de dados.\n");
+            exit(1);
+        }
+        /* Uma interrupcao durante a gravacao pode deixar o backup sem o arquivo principal. */
+        if (rename(ARQUIVO_BACKUP, ARQUIVO_DADOS) != 0) {
+            return 0;
+        }
+        f = fopen(ARQUIVO_DADOS, "rb");
+        if (f == NULL) {
+            printf("Nao foi possivel recuperar o arquivo de dados.\n");
+            exit(1);
+        }
     }
 
     if (fseek(f, 0, SEEK_END) != 0) {
