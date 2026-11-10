@@ -23,7 +23,6 @@
 #define MAX_ESTOQUE        10000
 #define MAX_SEMANAS_EXTRAS 30
 
-/* Tipos de filtro usados na listagem de reservas */
 #define FILTRO_TODAS     0
 #define FILTRO_DATA      1
 #define FILTRO_PROFESSOR 2
@@ -68,7 +67,7 @@ typedef struct {
     int qtdLabs, qtdEquips, qtdReservas;
 } Cabecalho;
 
-/* Todos os dados do programa; é passado por ponteiro, sem variáveis globais. */
+/* O sistema e passado por ponteiro para as funcoes alterarem os cadastros. */
 typedef struct {
     Cabecalho    info;
     Laboratorio *labs;
@@ -78,7 +77,6 @@ typedef struct {
 
 /* Leitura e validação da entrada */
 
-/* Remove os espaços do início e do fim de um texto. */
 void aparar(char *texto) {
     char *inicio = texto;
     char *fim;
@@ -134,7 +132,6 @@ void lerTexto(char *pergunta, char *destino, int tamanho) {
     }
 }
 
-/* Lê um inteiro entre minimo e maximo, repetindo enquanto for inválido. */
 int lerInteiro(char *pergunta, int minimo, int maximo) {
     char linha[32], sobra;
     int valor;
@@ -153,7 +150,6 @@ int lerInteiro(char *pergunta, int minimo, int maximo) {
     }
 }
 
-/* Retorna 1 para sim e 0 para não. */
 int lerConfirmacao(char *pergunta) {
     char linha[8];
 
@@ -225,7 +221,6 @@ char *nomeDiaSemana(Data d) {
     return nomes[totalDias % 7];
 }
 
-/* Compara o momento informado com o relógio do computador. */
 int horarioJaPassou(Data d, int minutos) {
     time_t agora = time(NULL);
     struct tm *t = localtime(&agora);
@@ -303,7 +298,7 @@ void lerDataEPeriodo(Reserva *r) {
 
 /* Busca nos vetores */
 
-/* As três buscas retornam a posição no vetor, ou -1 se o ID não existir. */
+/* Os IDs sao usados nas reservas; a posicao no vetor pode mudar apos uma exclusao. */
 int buscarLab(Sistema *s, int id) {
     for (int i = 0; i < s->info.qtdLabs; i++) {
         if (s->labs[i].id == id) {
@@ -682,7 +677,6 @@ int validarReserva(Sistema *s, Reserva *r, int idIgnorado) {
     return valida;
 }
 
-/* Retorna 1 se a reserva está confirmada e ainda não começou. */
 int reservaFutura(Reserva *r) {
     return r->status == STATUS_CONFIRMADA && !horarioJaPassou(r->data, r->inicioMin);
 }
@@ -755,7 +749,6 @@ void listarEquips(Sistema *s) {
     }
 }
 
-/* Mostra cada equipamento com as unidades livres no período. */
 void listarEquipsLivres(Sistema *s, Data d, int inicio, int fim, int idIgnorado) {
     imprimirTitulo("Equipamentos no horario");
     if (s->info.qtdEquips == 0) {
@@ -809,7 +802,6 @@ int contemTexto(char *texto, char *procurado) {
     return 0;
 }
 
-/* Retorna 1 se a reserva deve aparecer na listagem pedida. */
 int passaNoFiltro(Reserva *r, int filtro, Data d, char *texto) {
     if (filtro == FILTRO_DATA) {
         return r->status == STATUS_CONFIRMADA && dataInt(r->data) == dataInt(d);
@@ -831,7 +823,6 @@ int vemAntes(Reserva *a, Reserva *b) {
     return a->idLaboratorio < b->idLaboratorio;
 }
 
-/* Exibe em ordem cronológica as reservas que passam no filtro. */
 void listarReservas(Sistema *s, char *titulo, int filtro, Data d, char *texto) {
     int *lista = malloc((size_t)(s->info.qtdReservas + 1) * sizeof(int)); /* Indices selecionados */
     int quantidade = 0;
@@ -853,7 +844,7 @@ void listarReservas(Sistema *s, char *titulo, int filtro, Data d, char *texto) {
         return;
     }
 
-    /* Ordenacao por data e horario. */
+    /* Ordena os indices, sem mudar a ordem das reservas armazenadas. */
     for (int i = 0; i < quantidade - 1; i++) {
         for (int j = 0; j < quantidade - 1 - i; j++) {
             if (vemAntes(&s->reservas[lista[j + 1]], &s->reservas[lista[j]])) {
@@ -880,7 +871,6 @@ void listarReservas(Sistema *s, char *titulo, int filtro, Data d, char *texto) {
 
 /* CRUD de reservas */
 
-/* Pede um laboratório livre que comporte a turma. Retorna 0 se o usuário desistir. */
 int escolherLab(Sistema *s, Reserva *r, int idIgnorado) {
     while (1) {
         int id = lerInteiro("ID do laboratorio (0 para voltar): ", 0, MAX_ID);
@@ -903,7 +893,7 @@ int escolherLab(Sistema *s, Reserva *r, int idIgnorado) {
     }
 }
 
-/* Define os equipamentos da reserva, limitando cada pedido às unidades livres. */
+/* Os equipamentos sao do estoque comum, mesmo quando as aulas sao em labs diferentes. */
 void selecionarEquips(Sistema *s, Reserva *r, int idIgnorado) {
     r->qtdItens = 0;
     if (s->info.qtdEquips == 0 || !lerConfirmacao("Deseja reservar equipamentos?")) {
@@ -1323,8 +1313,7 @@ void consultarDisponibilidade(Sistema *s) {
 void exibirRelatorio(Sistema *s) {
     int confirmadas = 0;
     int canceladas = 0;
-    /* calloc inicia os contadores em zero. */
-    int *minutos = calloc((size_t)s->info.qtdLabs + 1, sizeof(int));
+        int *minutos = calloc((size_t)s->info.qtdLabs + 1, sizeof(int));
     int *unidades = calloc((size_t)s->info.qtdEquips + 1, sizeof(int));
 
     if (minutos == NULL || unidades == NULL) {
