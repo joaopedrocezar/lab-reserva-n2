@@ -1099,8 +1099,9 @@ void editarReserva(Sistema *s) {
         case 7:
             if (validarReserva(s, &c, c.id)) {
                 s->reservas[posicao] = c;
-                salvarDados(s);
-                printf("Reserva atualizada.\n");
+                if (salvarDados(s)) {
+                    printf("Reserva atualizada.\n");
+                }
                 return;
             }
             printf("Corrija os problemas acima antes de salvar.\n");
@@ -1122,8 +1123,9 @@ void cancelarReserva(Sistema *s) {
     exibirDetalhes(s, &s->reservas[posicao]);
     if (lerConfirmacao("Cancelar esta reserva?")) {
         s->reservas[posicao].status = STATUS_CANCELADA;
-        salvarDados(s);
-        printf("Reserva cancelada. O horario foi liberado.\n");
+        if (salvarDados(s)) {
+            printf("Reserva cancelada. O horario foi liberado.\n");
+        }
     }
 }
 
@@ -1144,8 +1146,9 @@ void excluirReserva(Sistema *s) {
         s->reservas[i] = s->reservas[i + 1];
     }
     s->info.qtdReservas--;
-    salvarDados(s);
-    printf("Reserva excluida.\n");
+    if (salvarDados(s)) {
+        printf("Reserva excluida.\n");
+    }
 }
 
 /* CRUD de laboratórios e equipamentos */
@@ -1159,8 +1162,9 @@ void criarLab(Sistema *s) {
     lerTexto("Tipo: ", novo.tipo, TAM_NOME);
     novo.capacidade = lerInteiro("Capacidade de alunos: ", 1, MAX_ALUNOS);
     adicionarLab(s, novo);
-    salvarDados(s);
-    printf("Laboratorio cadastrado.\n");
+    if (salvarDados(s)) {
+        printf("Laboratorio cadastrado.\n");
+    }
 }
 
 /* A capacidade não pode ficar menor que a maior turma com reserva futura. */
@@ -1191,8 +1195,9 @@ void editarLab(Sistema *s) {
         minimo = maiorTurma;
     }
     l->capacidade = lerInteiro("Nova capacidade: ", minimo, MAX_ALUNOS);
-    salvarDados(s);
-    printf("Laboratorio atualizado.\n");
+    if (salvarDados(s)) {
+        printf("Laboratorio atualizado.\n");
+    }
 }
 
 void excluirLab(Sistema *s) {
@@ -1216,8 +1221,9 @@ void excluirLab(Sistema *s) {
         s->labs[i] = s->labs[i + 1];
     }
     s->info.qtdLabs--;
-    salvarDados(s);
-    printf("Laboratorio excluido.\n");
+    if (salvarDados(s)) {
+        printf("Laboratorio excluido.\n");
+    }
 }
 
 void criarEquip(Sistema *s) {
@@ -1228,8 +1234,9 @@ void criarEquip(Sistema *s) {
     lerTexto("Categoria: ", novo.categoria, TAM_NOME);
     novo.quantidadeTotal = lerInteiro("Quantidade total: ", 1, MAX_ESTOQUE);
     adicionarEquip(s, novo);
-    salvarDados(s);
-    printf("Equipamento cadastrado.\n");
+    if (salvarDados(s)) {
+        printf("Equipamento cadastrado.\n");
+    }
 }
 
 /* O total não pode ficar menor que o maior uso simultâneo em reservas futuras. */
@@ -1263,8 +1270,9 @@ void editarEquip(Sistema *s) {
         minimo = maiorUso;
     }
     e->quantidadeTotal = lerInteiro("Nova quantidade total: ", minimo, MAX_ESTOQUE);
-    salvarDados(s);
-    printf("Equipamento atualizado.\n");
+    if (salvarDados(s)) {
+        printf("Equipamento atualizado.\n");
+    }
 }
 
 void excluirEquip(Sistema *s) {
@@ -1288,8 +1296,9 @@ void excluirEquip(Sistema *s) {
         s->equips[i] = s->equips[i + 1];
     }
     s->info.qtdEquips--;
-    salvarDados(s);
-    printf("Equipamento excluido.\n");
+    if (salvarDados(s)) {
+        printf("Equipamento excluido.\n");
+    }
 }
 
 /* Consultas e relatórios */
@@ -1469,7 +1478,11 @@ int main(void) {
 
     if (!carregarDados(&s)) {
         cadastrarDadosIniciais(&s);
-        salvarDados(&s);
+        if (!salvarDados(&s)) {
+            free(s.labs);
+            free(s.equips);
+            return 1;
+        }
     }
 
     printf("==============================================\n");
