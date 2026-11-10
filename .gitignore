@@ -1,55 +1,106 @@
-# Prerequisites
-*.d
 
-# Object files
-*.o
-*.ko
-*.obj
-*.elf
-
-# Linker output
-*.ilk
-*.map
-*.exp
-
-# Precompiled Headers
-*.gch
-*.pch
-
-# Libraries
-*.lib
-*.a
-*.la
-*.lo
-
-# Shared objects (inc. Windows DLLs)
+# Executaveis e bibliotecas
+*.exe
+*.out
+*.app
 *.dll
 *.so
 *.so.*
 *.dylib
+*.a
+*.lib
+*.la
+*.lai
 
-# Executables
-*.exe
-*.out
-*.app
-*.i*86
-*.x86_64
-*.hex
-
-# Debug files
-*.dSYM/
-*.su
+# Arquivos objeto e intermediarios
+*.o
+*.obj
+*.lo
+*.d
+*.pch
+*.gch
+*.ilk
+*.exp
 *.idb
 *.pdb
+*.map
+*.tlog
+*.lastbuildstate
 
-# Kernel Module Compile Results
-*.mod*
-*.cmd
-.tmp_versions/
-modules.order
-Module.symvers
-Mkfile.old
-dkms.conf
+# Diretorios de compilacao
+build/
+Build/
+bin/
+obj/
+Debug/
+Release/
+x64/
+x86/
+cmake-build-*/
+out/
 
-# debug information files
-*.dwo
+# CMake
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+CTestTestfile.cmake
+compile_commands.json
+Testing/
+_deps/
+
+# Code::Blocks
+*.depend
+*.layout
+*.cbp.user
+
+# Visual Studio
+.vs/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.VC.db
+*.VC.opendb
+ipch/
+
+# VS Code
+.vscode/
+
+# CLion e JetBrains
+.idea/
+*.iml
+
+# Vim
+*.swp
+*.swo
+*~
+
+# Emacs
+\#*\#
+.#*
+
+# Arquivos de cobertura e profiling
+*.gcda
+*.gcno
+*.gcov
+*.profraw
+*.profdata
+coverage/
+
+# Arquivos de dados gerados pelo LabReserva
+reservas_lab.dat
+
+# Logs e arquivos temporarios
+*.log
+*.tmp
+*.temp
+*.bak
+*.backup
+*.orig
+*.rej
+
+# Arquivos do sistema operacional
+.DS_Store
+Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/
