@@ -5,9 +5,12 @@
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <time.h>
 
 #define ARQUIVO_DADOS      "reservas_lab.dat"
+#define ARQUIVO_TEMP       "reservas_lab.tmp"
+#define ARQUIVO_BACKUP     "reservas_lab.bak"
 #define ASSINATURA_ARQUIVO 0x4C414231
 
 #define TAM_NOME           60
@@ -19,7 +22,6 @@
 #define MAX_ALUNOS         500
 #define MAX_ESTOQUE        10000
 #define MAX_SEMANAS_EXTRAS 30
-#define LARGURA_GRAFICO    30
 
 /* Tipos de filtro usados na listagem de reservas */
 #define FILTRO_TODAS     0
@@ -74,14 +76,14 @@ typedef struct {
     Reserva     *reservas;
 } Sistema;
 
-/* ==================== Leitura e validação da entrada ==================== */
+/* Leitura e validação da entrada */
 
 /* Remove os espaços do início e do fim de um texto. */
 void aparar(char *texto) {
     int inicio = 0;
     int i = 0;
 
-    /* O cast para unsigned char evita erro com caracteres acentuados */
+    /* isspace espera um unsigned char. */
     while (isspace((unsigned char)texto[inicio])) {
         inicio++;
     }
@@ -98,31 +100,39 @@ void aparar(char *texto) {
     }
 }
 
-/* Lê uma linha sem deixar sobras no buffer. Encerra se a entrada terminar. */
-void lerLinha(char *destino, int tamanho) {
-    int fim = 0;
+/* Devolve 0 quando a linha nao cabe no campo informado. */
+int lerLinha(char *destino, int tamanho) {
+    char *quebra;
 
     if (fgets(destino, tamanho, stdin) == NULL) {
-        printf("\nEntrada encerrada. Os dados ja estao salvos.\n");
+        printf("\nEntrada encerrada.\n");
         exit(0);
     }
-    while (destino[fim] != '\0' && destino[fim] != '\n' && destino[fim] != '\r') {
-        fim++;
-    }
-    if (destino[fim] == '\0') { /* Linha maior que o buffer: descarta o resto */
+
+    quebra = strchr(destino, '\n');
+    if (quebra != NULL) {
+        *quebra = '\0';
+    } else {
         int c = getchar();
-        while (c != '\n' && c != EOF) {
-            c = getchar();
+        if (c != '\n' && c != EOF) {
+            while (c != '\n' && c != EOF) {
+                c = getchar();
+            }
+            printf("  Texto muito longo para este campo.\n");
+            return 0;
         }
     }
-    destino[fim] = '\0';
+
     aparar(destino);
+    return 1;
 }
 
 void lerTexto(char *pergunta, char *destino, int tamanho) {
     while (1) {
         printf("%s", pergunta);
-        lerLinha(destino, tamanho);
+        if (!lerLinha(destino, tamanho)) {
+            continue;
+        }
         if (destino[0] != '\0') {
             return;
         }
@@ -137,8 +147,10 @@ int lerInteiro(char *pergunta, int minimo, int maximo) {
 
     while (1) {
         printf("%s", pergunta);
-        lerLinha(linha, 32);
-        /* %c detecta letras depois do número; %9d limita a 9 dígitos */
+        if (!lerLinha(linha, 32)) {
+            continue;
+        }
+        /* %c detecta caracteres extras apos o numero. */
         if (sscanf(linha, "%9d%c", &valor, &sobra) == 1 &&
             valor >= minimo && valor <= maximo) {
             return valor;
@@ -153,7 +165,9 @@ int lerConfirmacao(char *pergunta) {
 
     while (1) {
         printf("%s (s/n): ", pergunta);
-        lerLinha(linha, 8);
+        if (!lerLinha(linha, 8)) {
+            continue;
+        }
         if (linha[0] != '\0' && linha[1] == '\0') {
             int resposta = tolower((unsigned char)linha[0]);
             if (resposta == 's') {
@@ -167,7 +181,7 @@ int lerConfirmacao(char *pergunta) {
     }
 }
 
-/* ======================== Datas e horários ============================== */
+/* Datas e horários */
 
 int diasNoMes(int mes, int ano) {
     int dias[12] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
@@ -239,7 +253,9 @@ void lerData(char *pergunta, Data *d) {
 
     while (1) {
         printf("%s", pergunta);
-        lerLinha(linha, 32);
+        if (!lerLinha(linha, 32)) {
+            continue;
+        }
         if (sscanf(linha, "%d/%d/%d%c", &d->dia, &d->mes, &d->ano, &sobra) == 3 &&
             dataValida(*d)) {
             return;
@@ -255,7 +271,9 @@ int lerHorario(char *pergunta) {
 
     while (1) {
         printf("%s", pergunta);
-        lerLinha(linha, 32);
+        if (!lerLinha(linha, 32)) {
+            continue;
+        }
         if (sscanf(linha, "%d:%d%c", &hora, &minuto, &sobra) == 2 &&
             hora >= 0 && hora <= 23 && minuto >= 0 && minuto <= 59) {
             return hora * 60 + minuto;
@@ -289,7 +307,7 @@ void lerDataEPeriodo(Reserva *r) {
     }
 }
 
-/* ======================= Busca nos vetores ============================== */
+/* Busca nos vetores */
 
 /* As três buscas retornam a posição no vetor, ou -1 se o ID não existir. */
 int buscarLab(Sistema *s, int id) {
@@ -337,72 +355,131 @@ char *nomeEquip(Sistema *s, int id) {
     return s->equips[posicao].nome;
 }
 
-/* ======================= Arquivo binário ================================ */
+/* Arquivo binário */
 
-/* Grava todos os dados; é chamada após cada alteração. */
-void salvarDados(Sistema *s) {
-    FILE *f = fopen(ARQUIVO_DADOS, "wb");
+/* Grava primeiro em um arquivo temporario para nao perder o arquivo anterior. */
+int salvarDados(Sistema *s) {
+    FILE *f = fopen(ARQUIVO_TEMP, "wb");
     int ok = 1;
 
     if (f == NULL) {
-        printf("  ATENCAO: nao foi possivel gravar %s.\n", ARQUIVO_DADOS);
-        return;
+        printf("  Nao foi possivel salvar os dados.\n");
+        return 0;
     }
-    if (fwrite(&s->info, sizeof(Cabecalho), 1, f) != 1) {
-        ok = 0;
-    }
-    if (s->info.qtdLabs > 0 &&
-        (int)fwrite(s->labs, sizeof(Laboratorio), s->info.qtdLabs, f) != s->info.qtdLabs) {
-        ok = 0;
-    }
-    if (s->info.qtdEquips > 0 &&
-        (int)fwrite(s->equips, sizeof(Equipamento), s->info.qtdEquips, f) != s->info.qtdEquips) {
-        ok = 0;
-    }
-    if (s->info.qtdReservas > 0 &&
-        (int)fwrite(s->reservas, sizeof(Reserva), s->info.qtdReservas, f) != s->info.qtdReservas) {
+
+    if (fwrite(&s->info, sizeof(Cabecalho), 1, f) != 1 ||
+        (s->info.qtdLabs > 0 &&
+         fwrite(s->labs, sizeof(Laboratorio), (size_t)s->info.qtdLabs, f) != (size_t)s->info.qtdLabs) ||
+        (s->info.qtdEquips > 0 &&
+         fwrite(s->equips, sizeof(Equipamento), (size_t)s->info.qtdEquips, f) != (size_t)s->info.qtdEquips) ||
+        (s->info.qtdReservas > 0 &&
+         fwrite(s->reservas, sizeof(Reserva), (size_t)s->info.qtdReservas, f) != (size_t)s->info.qtdReservas)) {
         ok = 0;
     }
     if (fclose(f) != 0) {
         ok = 0;
     }
     if (!ok) {
-        printf("  ATENCAO: falha ao gravar %s.\n", ARQUIVO_DADOS);
+        remove(ARQUIVO_TEMP);
+        printf("  Falha ao gravar os dados.\n");
+        return 0;
     }
+
+    /* Em alguns sistemas o rename nao substitui um arquivo existente. */
+    if (rename(ARQUIVO_TEMP, ARQUIVO_DADOS) != 0) {
+        remove(ARQUIVO_BACKUP);
+        if (rename(ARQUIVO_DADOS, ARQUIVO_BACKUP) != 0) {
+            remove(ARQUIVO_TEMP);
+            printf("  Falha ao substituir o arquivo de dados.\n");
+            return 0;
+        }
+        if (rename(ARQUIVO_TEMP, ARQUIVO_DADOS) != 0) {
+            rename(ARQUIVO_BACKUP, ARQUIVO_DADOS);
+            remove(ARQUIVO_TEMP);
+            printf("  Falha ao substituir o arquivo de dados.\n");
+            return 0;
+        }
+        remove(ARQUIVO_BACKUP);
+    }
+    return 1;
 }
 
 /* Retorna 0 se o arquivo não existe. Se estiver danificado, encerra sem alterá-lo. */
 int carregarDados(Sistema *s) {
     FILE *f = fopen(ARQUIVO_DADOS, "rb");
     int ok = 1;
+    long tamanhoArquivo;
 
     if (f == NULL) {
         return 0;
     }
-    if (fread(&s->info, sizeof(Cabecalho), 1, f) != 1 ||
-        s->info.assinatura != ASSINATURA_ARQUIVO || s->info.qtdLabs < 0 ||
-        s->info.qtdEquips < 0 || s->info.qtdReservas < 0) {
+
+    if (fseek(f, 0, SEEK_END) != 0) {
         ok = 0;
     }
+    tamanhoArquivo = ok ? ftell(f) : -1;
+    if (tamanhoArquivo < 0 || fseek(f, 0, SEEK_SET) != 0) {
+        ok = 0;
+    }
+    if (ok && (fread(&s->info, sizeof(Cabecalho), 1, f) != 1 ||
+        s->info.assinatura != ASSINATURA_ARQUIVO ||
+        s->info.qtdLabs < 0 || s->info.qtdLabs > MAX_ID ||
+        s->info.qtdEquips < 0 || s->info.qtdEquips > MAX_ID ||
+        s->info.qtdReservas < 0 || s->info.qtdReservas > MAX_ID ||
+        s->info.proximoLab < 1 || s->info.proximoEquip < 1 || s->info.proximoReserva < 1 ||
+        s->info.proximoLab > MAX_ID + 1 || s->info.proximoEquip > MAX_ID + 1 ||
+        s->info.proximoReserva > MAX_ID + 1)) {
+        ok = 0;
+    }
+    if (ok) {
+        size_t esperado = sizeof(Cabecalho) +
+            (size_t)s->info.qtdLabs * sizeof(Laboratorio) +
+            (size_t)s->info.qtdEquips * sizeof(Equipamento) +
+            (size_t)s->info.qtdReservas * sizeof(Reserva);
+        if ((size_t)tamanhoArquivo != esperado) {
+            ok = 0;
+        }
+    }
     if (ok && s->info.qtdLabs > 0) {
-        s->labs = malloc(s->info.qtdLabs * sizeof(Laboratorio));
+        s->labs = malloc((size_t)s->info.qtdLabs * sizeof(Laboratorio));
         if (s->labs == NULL ||
-            (int)fread(s->labs, sizeof(Laboratorio), s->info.qtdLabs, f) != s->info.qtdLabs) {
+            fread(s->labs, sizeof(Laboratorio), (size_t)s->info.qtdLabs, f) != (size_t)s->info.qtdLabs) {
             ok = 0;
         }
     }
     if (ok && s->info.qtdEquips > 0) {
-        s->equips = malloc(s->info.qtdEquips * sizeof(Equipamento));
+        s->equips = malloc((size_t)s->info.qtdEquips * sizeof(Equipamento));
         if (s->equips == NULL ||
-            (int)fread(s->equips, sizeof(Equipamento), s->info.qtdEquips, f) != s->info.qtdEquips) {
+            fread(s->equips, sizeof(Equipamento), (size_t)s->info.qtdEquips, f) != (size_t)s->info.qtdEquips) {
             ok = 0;
         }
     }
     if (ok && s->info.qtdReservas > 0) {
-        s->reservas = malloc(s->info.qtdReservas * sizeof(Reserva));
+        s->reservas = malloc((size_t)s->info.qtdReservas * sizeof(Reserva));
         if (s->reservas == NULL ||
-            (int)fread(s->reservas, sizeof(Reserva), s->info.qtdReservas, f) != s->info.qtdReservas) {
+            fread(s->reservas, sizeof(Reserva), (size_t)s->info.qtdReservas, f) != (size_t)s->info.qtdReservas) {
             ok = 0;
+        }
+    }
+    if (ok) {
+        for (int i = 0; i < s->info.qtdReservas; i++) {
+            Reserva *r = &s->reservas[i];
+            if (r->qtdItens < 0 || r->qtdItens > MAX_ITENS || !dataValida(r->data) ||
+                r->inicioMin < HORA_ABERTURA || r->fimMin > HORA_FECHAMENTO ||
+                r->inicioMin >= r->fimMin || r->qtdAlunos < 1 || r->qtdAlunos > MAX_ALUNOS ||
+                (r->status != STATUS_CONFIRMADA && r->status != STATUS_CANCELADA)) {
+                ok = 0;
+                break;
+            }
+            for (int j = 0; j < r->qtdItens; j++) {
+                if (r->itens[j].quantidade < 1 || r->itens[j].quantidade > MAX_ESTOQUE) {
+                    ok = 0;
+                    break;
+                }
+            }
+            if (!ok) {
+                break;
+            }
         }
     }
     fclose(f);
@@ -410,13 +487,13 @@ int carregarDados(Sistema *s) {
     if (!ok) {
         printf("Erro: o arquivo %s esta danificado ou e de outra versao do programa.\n",
                ARQUIVO_DADOS);
-        printf("Renomeie ou apague o arquivo para comecar do zero.\n");
+        printf("Guarde uma copia do arquivo antes de tentar recupera-lo.\n");
         exit(1);
     }
     return 1;
 }
 
-/* ===================== Inclusão nos vetores ============================= */
+/* Inclusão nos vetores */
 
 void erroMemoria(void) {
     printf("Erro: memoria insuficiente.\n");
@@ -424,38 +501,35 @@ void erroMemoria(void) {
 }
 
 void adicionarLab(Sistema *s, Laboratorio novo) {
-    s->labs = realloc(s->labs, (s->info.qtdLabs + 1) * sizeof(Laboratorio));
-    if (s->labs == NULL) {
+    Laboratorio *aumentado = realloc(s->labs, (size_t)(s->info.qtdLabs + 1) * sizeof(Laboratorio));
+    if (aumentado == NULL) {
         erroMemoria();
     }
-    novo.id = s->info.proximoLab;
-    s->info.proximoLab++;
-    s->labs[s->info.qtdLabs] = novo;
-    s->info.qtdLabs++;
+    s->labs = aumentado;
+    novo.id = s->info.proximoLab++;
+    s->labs[s->info.qtdLabs++] = novo;
 }
 
 void adicionarEquip(Sistema *s, Equipamento novo) {
-    s->equips = realloc(s->equips, (s->info.qtdEquips + 1) * sizeof(Equipamento));
-    if (s->equips == NULL) {
+    Equipamento *aumentado = realloc(s->equips, (size_t)(s->info.qtdEquips + 1) * sizeof(Equipamento));
+    if (aumentado == NULL) {
         erroMemoria();
     }
-    novo.id = s->info.proximoEquip;
-    s->info.proximoEquip++;
-    s->equips[s->info.qtdEquips] = novo;
-    s->info.qtdEquips++;
+    s->equips = aumentado;
+    novo.id = s->info.proximoEquip++;
+    s->equips[s->info.qtdEquips++] = novo;
 }
 
 /* Inclui a reserva como confirmada e retorna o ID gerado. */
 int adicionarReserva(Sistema *s, Reserva nova) {
-    s->reservas = realloc(s->reservas, (s->info.qtdReservas + 1) * sizeof(Reserva));
-    if (s->reservas == NULL) {
+    Reserva *aumentado = realloc(s->reservas, (size_t)(s->info.qtdReservas + 1) * sizeof(Reserva));
+    if (aumentado == NULL) {
         erroMemoria();
     }
-    nova.id = s->info.proximoReserva;
+    s->reservas = aumentado;
+    nova.id = s->info.proximoReserva++;
     nova.status = STATUS_CONFIRMADA;
-    s->info.proximoReserva++;
-    s->reservas[s->info.qtdReservas] = nova;
-    s->info.qtdReservas++;
+    s->reservas[s->info.qtdReservas++] = nova;
     return nova.id;
 }
 
@@ -484,7 +558,7 @@ void cadastrarDadosIniciais(Sistema *s) {
     }
 }
 
-/* ======================= Regras de negócio ============================== */
+/* Regras de negócio */
 
 /*
  * Retorna 1 se a reserva está confirmada e coincide com o período. Períodos
@@ -554,6 +628,16 @@ int validarReserva(Sistema *s, Reserva *r, int idIgnorado) {
     int posicaoConflito;
     int valida = 1;
 
+    if (!dataValida(r->data) || r->inicioMin < HORA_ABERTURA ||
+        r->fimMin > HORA_FECHAMENTO || r->inicioMin >= r->fimMin) {
+        printf("  - Data ou horario fora dos limites permitidos.\n");
+        return 0;
+    }
+    if (r->qtdItens < 0 || r->qtdItens > MAX_ITENS ||
+        r->qtdAlunos < 1 || r->qtdAlunos > MAX_ALUNOS) {
+        printf("  - Quantidade de alunos ou itens invalida.\n");
+        return 0;
+    }
     if (horarioJaPassou(r->data, r->inicioMin)) {
         printf("  - O horario informado ja passou.\n");
         valida = 0;
@@ -590,6 +674,10 @@ int validarReserva(Sistema *s, Reserva *r, int idIgnorado) {
             int livres = unidadesLivres(s, &s->equips[posicaoEquip], r->data,
                                         r->inicioMin, r->fimMin, idIgnorado);
 
+            if (r->itens[i].quantidade < 1) {
+                printf("  - Quantidade invalida para %s.\n", s->equips[posicaoEquip].nome);
+                valida = 0;
+            }
             if (r->itens[i].quantidade > livres) {
                 printf("  - %s: pedidas %d unidades, disponiveis %d.\n",
                        s->equips[posicaoEquip].nome, r->itens[i].quantidade, livres);
@@ -605,7 +693,7 @@ int reservaFutura(Reserva *r) {
     return r->status == STATUS_CONFIRMADA && !horarioJaPassou(r->data, r->inicioMin);
 }
 
-/* ============================ Exibição ================================== */
+/* Exibição */
 
 void imprimirTitulo(char *titulo) {
     printf("\n=== %s ===\n", titulo);
@@ -697,7 +785,7 @@ void exibirDetalhes(Sistema *s, Reserva *r) {
            nomeDiaSemana(r->data), r->data.dia, r->data.mes, r->data.ano,
            r->inicioMin / 60, r->inicioMin % 60, r->fimMin / 60, r->fimMin % 60);
     printf("  Alunos    : %d\n", r->qtdAlunos);
-    if (r->id != 0) { /* ID zero: reserva ainda em preenchimento */
+    if (r->id != 0) { /* Reserva sem ID ainda nao foi confirmada. */
         printf("  Situacao  : %s\n", textoStatus(r->status));
     }
     printf("  Equipamentos:");
@@ -751,7 +839,7 @@ int vemAntes(Reserva *a, Reserva *b) {
 
 /* Exibe em ordem cronológica as reservas que passam no filtro. */
 void listarReservas(Sistema *s, char *titulo, int filtro, Data d, char *texto) {
-    int *lista = malloc((s->info.qtdReservas + 1) * sizeof(int)); /* Posições selecionadas */
+    int *lista = malloc((size_t)(s->info.qtdReservas + 1) * sizeof(int)); /* Indices selecionados */
     int quantidade = 0;
 
     imprimirTitulo(titulo);
@@ -771,7 +859,7 @@ void listarReservas(Sistema *s, char *titulo, int filtro, Data d, char *texto) {
         return;
     }
 
-    /* Ordenação pelo método da bolha */
+    /* Ordenacao por data e horario. */
     for (int i = 0; i < quantidade - 1; i++) {
         for (int j = 0; j < quantidade - 1 - i; j++) {
             if (vemAntes(&s->reservas[lista[j + 1]], &s->reservas[lista[j]])) {
@@ -796,7 +884,7 @@ void listarReservas(Sistema *s, char *titulo, int filtro, Data d, char *texto) {
     free(lista);
 }
 
-/* ===================== CRUD de reservas ================================= */
+/* CRUD de reservas */
 
 /* Pede um laboratório livre que comporte a turma. Retorna 0 se o usuário desistir. */
 int escolherLab(Sistema *s, Reserva *r, int idIgnorado) {
@@ -870,6 +958,10 @@ void replicarSemanalmente(Sistema *s, Reserva base, int semanas) {
         Reserva copia = base;
 
         copia.data = somarDias(base.data, 7 * i);
+        if (!dataValida(copia.data)) {
+            printf("Limite de datas atingido.\n");
+            break;
+        }
         printf("Semana de %02d/%02d/%04d:\n", copia.data.dia, copia.data.mes, copia.data.ano);
         if (validarReserva(s, &copia, 0)) {
             printf("  Reserva %d criada.\n", adicionarReserva(s, copia));
@@ -914,14 +1006,19 @@ void criarReserva(Sistema *s) {
         printf("Reserva nao realizada.\n");
         return;
     }
-    printf("Reserva %d confirmada.\n", adicionarReserva(s, nova));
+    int idCriado = adicionarReserva(s, nova);
+    if (!salvarDados(s)) {
+        printf("A reserva %d ficou na memoria, mas nao foi salva no arquivo.\n", idCriado);
+        return;
+    }
+    printf("Reserva %d confirmada.\n", idCriado);
 
     semanas = lerInteiro("Repetir em quantas semanas seguintes (0 para nenhuma)? ",
                          0, MAX_SEMANAS_EXTRAS);
     if (semanas > 0) {
         replicarSemanalmente(s, nova, semanas);
+        salvarDados(s);
     }
-    salvarDados(s);
 }
 
 void consultarReserva(Sistema *s) {
@@ -1050,7 +1147,7 @@ void excluirReserva(Sistema *s) {
     printf("Reserva excluida.\n");
 }
 
-/* ================== CRUD de laboratórios e equipamentos ================= */
+/* CRUD de laboratórios e equipamentos */
 
 void criarLab(Sistema *s) {
     Laboratorio novo = {0};
@@ -1194,7 +1291,7 @@ void excluirEquip(Sistema *s) {
     printf("Equipamento excluido.\n");
 }
 
-/* ===================== Consultas e relatórios =========================== */
+/* Consultas e relatórios */
 
 void listarTodasReservas(Sistema *s) {
     Data semData = {0, 0, 0};
@@ -1229,39 +1326,12 @@ void consultarDisponibilidade(Sistema *s) {
     listarEquipsLivres(s, d, inicio, fim, 0);
 }
 
-int maiorValor(int *valores, int quantidade) {
-    int maior = 0;
-
-    for (int i = 0; i < quantidade; i++) {
-        if (valores[i] > maior) {
-            maior = valores[i];
-        }
-    }
-    return maior;
-}
-
-/* Desenha uma barra proporcional; valores pequenos continuam visíveis. */
-void imprimirBarra(int valor, int maximo) {
-    int tamanho = 0;
-
-    if (maximo > 0) {
-        tamanho = valor * LARGURA_GRAFICO / maximo;
-    }
-    if (valor > 0 && tamanho == 0) {
-        tamanho = 1;
-    }
-    for (int i = 0; i < tamanho; i++) {
-        printf("#");
-    }
-    printf("\n");
-}
-
 void exibirRelatorio(Sistema *s) {
     int confirmadas = 0;
     int canceladas = 0;
-    /* calloc cria os vetores zerados; o "+ 1" evita pedir tamanho zero */
-    int *minutos = calloc(s->info.qtdLabs + 1, sizeof(int));
-    int *unidades = calloc(s->info.qtdEquips + 1, sizeof(int));
+    /* calloc inicia os contadores em zero. */
+    int *minutos = calloc((size_t)s->info.qtdLabs + 1, sizeof(int));
+    int *unidades = calloc((size_t)s->info.qtdEquips + 1, sizeof(int));
 
     if (minutos == NULL || unidades == NULL) {
         printf("Memoria insuficiente para gerar o relatorio.\n");
@@ -1293,20 +1363,18 @@ void exibirRelatorio(Sistema *s) {
 
     imprimirTitulo("Horas reservadas por laboratorio");
     for (int i = 0; i < s->info.qtdLabs; i++) {
-        printf("%-22.22s %4d:%02d h  ", s->labs[i].nome, minutos[i] / 60, minutos[i] % 60);
-        imprimirBarra(minutos[i], maiorValor(minutos, s->info.qtdLabs));
+        printf("%-22.22s %d h %02d min\n", s->labs[i].nome, minutos[i] / 60, minutos[i] % 60);
     }
 
-    imprimirTitulo("Unidades reservadas por equipamento");
+    imprimirTitulo("Total de unidades solicitadas por equipamento");
     for (int i = 0; i < s->info.qtdEquips; i++) {
-        printf("%-22.22s %6d un  ", s->equips[i].nome, unidades[i]);
-        imprimirBarra(unidades[i], maiorValor(unidades, s->info.qtdEquips));
+        printf("%-22.22s %d unidades\n", s->equips[i].nome, unidades[i]);
     }
     free(minutos);
     free(unidades);
 }
 
-/* =============================== Menus ================================== */
+/* Menus */
 
 void menuReservas(Sistema *s) {
     while (1) {
