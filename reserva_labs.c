@@ -407,6 +407,10 @@ int carregarDados(Sistema *s) {
         }
         /* Uma interrupcao durante a gravacao pode deixar o backup sem o arquivo principal. */
         if (rename(ARQUIVO_BACKUP, ARQUIVO_DADOS) != 0) {
+            if (errno != ENOENT) {
+                printf("Nao foi possivel restaurar o backup.\n");
+                exit(1);
+            }
             return 0;
         }
         f = fopen(ARQUIVO_DADOS, "rb");
