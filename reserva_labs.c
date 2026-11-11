@@ -3,11 +3,15 @@
 */
 
 #include <ctype.h>
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <time.h>
 
 #define ARQUIVO_DADOS      "reservas_lab.dat"
+#define ARQUIVO_TEMP       "reservas_lab.tmp"
+#define ARQUIVO_BACKUP     "reservas_lab.bak"
 #define ASSINATURA_ARQUIVO 0x4C414231
 
 #define TAM_NOME           60
@@ -19,9 +23,7 @@
 #define MAX_ALUNOS         500
 #define MAX_ESTOQUE        10000
 #define MAX_SEMANAS_EXTRAS 30
-#define LARGURA_GRAFICO    30
 
-/* Tipos de filtro usados na listagem de reservas */
 #define FILTRO_TODAS     0
 #define FILTRO_DATA      1
 #define FILTRO_PROFESSOR 2
@@ -66,7 +68,7 @@ typedef struct {
     int qtdLabs, qtdEquips, qtdReservas;
 } Cabecalho;
 
-/* Todos os dados do programa; é passado por ponteiro, sem variáveis globais. */
+/* O sistema e passado por ponteiro para as funcoes alterarem os cadastros. */
 typedef struct {
     Cabecalho    info;
     Laboratorio *labs;
@@ -74,55 +76,56 @@ typedef struct {
     Reserva     *reservas;
 } Sistema;
 
-/* ==================== Leitura e validação da entrada ==================== */
+/* Leitura e validação da entrada */
 
-/* Remove os espaços do início e do fim de um texto. */
 void aparar(char *texto) {
-    int inicio = 0;
-    int i = 0;
+    char *inicio = texto;
+    char *fim;
 
-    /* O cast para unsigned char evita erro com caracteres acentuados */
-    while (isspace((unsigned char)texto[inicio])) {
+    while (isspace((unsigned char)*inicio)) {
         inicio++;
     }
-    while (texto[inicio] != '\0') {
-        texto[i] = texto[inicio];
-        i++;
-        inicio++;
+    fim = inicio + strlen(inicio);
+    while (fim > inicio && isspace((unsigned char)fim[-1])) {
+        fim--;
     }
-    texto[i] = '\0';
-
-    while (i > 0 && isspace((unsigned char)texto[i - 1])) {
-        i--;
-        texto[i] = '\0';
-    }
+    *fim = '\0';
+    memmove(texto, inicio, (size_t)(fim - inicio) + 1);
 }
 
-/* Lê uma linha sem deixar sobras no buffer. Encerra se a entrada terminar. */
-void lerLinha(char *destino, int tamanho) {
-    int fim = 0;
+/* Devolve 0 quando a linha nao cabe no campo informado. */
+int lerLinha(char *destino, int tamanho) {
+    char *quebra;
 
     if (fgets(destino, tamanho, stdin) == NULL) {
-        printf("\nEntrada encerrada. Os dados ja estao salvos.\n");
+        printf("\nEntrada encerrada.\n");
         exit(0);
     }
-    while (destino[fim] != '\0' && destino[fim] != '\n' && destino[fim] != '\r') {
-        fim++;
-    }
-    if (destino[fim] == '\0') { /* Linha maior que o buffer: descarta o resto */
+
+    quebra = strchr(destino, '\n');
+    if (quebra != NULL) {
+        *quebra = '\0';
+    } else {
         int c = getchar();
-        while (c != '\n' && c != EOF) {
-            c = getchar();
+        if (c != '\n' && c != EOF) {
+            while (c != '\n' && c != EOF) {
+                c = getchar();
+            }
+            printf("  Texto muito longo para este campo.\n");
+            return 0;
         }
     }
-    destino[fim] = '\0';
+
     aparar(destino);
+    return 1;
 }
 
 void lerTexto(char *pergunta, char *destino, int tamanho) {
     while (1) {
         printf("%s", pergunta);
-        lerLinha(destino, tamanho);
+        if (!lerLinha(destino, tamanho)) {
+            continue;
+        }
         if (destino[0] != '\0') {
             return;
         }
@@ -130,15 +133,16 @@ void lerTexto(char *pergunta, char *destino, int tamanho) {
     }
 }
 
-/* Lê um inteiro entre minimo e maximo, repetindo enquanto for inválido. */
 int lerInteiro(char *pergunta, int minimo, int maximo) {
     char linha[32], sobra;
     int valor;
 
     while (1) {
         printf("%s", pergunta);
-        lerLinha(linha, 32);
-        /* %c detecta letras depois do número; %9d limita a 9 dígitos */
+        if (!lerLinha(linha, 32)) {
+            continue;
+        }
+        /* %c detecta caracteres extras apos o numero. */
         if (sscanf(linha, "%9d%c", &valor, &sobra) == 1 &&
             valor >= minimo && valor <= maximo) {
             return valor;
@@ -147,13 +151,14 @@ int lerInteiro(char *pergunta, int minimo, int maximo) {
     }
 }
 
-/* Retorna 1 para sim e 0 para não. */
 int lerConfirmacao(char *pergunta) {
     char linha[8];
 
     while (1) {
         printf("%s (s/n): ", pergunta);
-        lerLinha(linha, 8);
+        if (!lerLinha(linha, 8)) {
+            continue;
+        }
         if (linha[0] != '\0' && linha[1] == '\0') {
             int resposta = tolower((unsigned char)linha[0]);
             if (resposta == 's') {
@@ -167,7 +172,7 @@ int lerConfirmacao(char *pergunta) {
     }
 }
 
-/* ======================== Datas e horários ============================== */
+/* Datas e horários */
 
 int diasNoMes(int mes, int ano) {
     int dias[12] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
@@ -217,7 +222,6 @@ char *nomeDiaSemana(Data d) {
     return nomes[totalDias % 7];
 }
 
-/* Compara o momento informado com o relógio do computador. */
 int horarioJaPassou(Data d, int minutos) {
     time_t agora = time(NULL);
     struct tm *t = localtime(&agora);
@@ -239,7 +243,9 @@ void lerData(char *pergunta, Data *d) {
 
     while (1) {
         printf("%s", pergunta);
-        lerLinha(linha, 32);
+        if (!lerLinha(linha, 32)) {
+            continue;
+        }
         if (sscanf(linha, "%d/%d/%d%c", &d->dia, &d->mes, &d->ano, &sobra) == 3 &&
             dataValida(*d)) {
             return;
@@ -255,7 +261,9 @@ int lerHorario(char *pergunta) {
 
     while (1) {
         printf("%s", pergunta);
-        lerLinha(linha, 32);
+        if (!lerLinha(linha, 32)) {
+            continue;
+        }
         if (sscanf(linha, "%d:%d%c", &hora, &minuto, &sobra) == 2 &&
             hora >= 0 && hora <= 23 && minuto >= 0 && minuto <= 59) {
             return hora * 60 + minuto;
@@ -289,9 +297,9 @@ void lerDataEPeriodo(Reserva *r) {
     }
 }
 
-/* ======================= Busca nos vetores ============================== */
+/* Busca nos vetores */
 
-/* As três buscas retornam a posição no vetor, ou -1 se o ID não existir. */
+/* Os IDs sao usados nas reservas; a posicao no vetor pode mudar apos uma exclusao. */
 int buscarLab(Sistema *s, int id) {
     for (int i = 0; i < s->info.qtdLabs; i++) {
         if (s->labs[i].id == id) {
@@ -337,72 +345,147 @@ char *nomeEquip(Sistema *s, int id) {
     return s->equips[posicao].nome;
 }
 
-/* ======================= Arquivo binário ================================ */
+/* Arquivo binário */
 
-/* Grava todos os dados; é chamada após cada alteração. */
-void salvarDados(Sistema *s) {
-    FILE *f = fopen(ARQUIVO_DADOS, "wb");
+/* Grava primeiro em um arquivo temporario para nao perder o arquivo anterior. */
+int salvarDados(Sistema *s) {
+    FILE *f = fopen(ARQUIVO_TEMP, "wb");
     int ok = 1;
 
     if (f == NULL) {
-        printf("  ATENCAO: nao foi possivel gravar %s.\n", ARQUIVO_DADOS);
-        return;
+        printf("  Nao foi possivel salvar os dados.\n");
+        return 0;
     }
-    if (fwrite(&s->info, sizeof(Cabecalho), 1, f) != 1) {
-        ok = 0;
-    }
-    if (s->info.qtdLabs > 0 &&
-        (int)fwrite(s->labs, sizeof(Laboratorio), s->info.qtdLabs, f) != s->info.qtdLabs) {
-        ok = 0;
-    }
-    if (s->info.qtdEquips > 0 &&
-        (int)fwrite(s->equips, sizeof(Equipamento), s->info.qtdEquips, f) != s->info.qtdEquips) {
-        ok = 0;
-    }
-    if (s->info.qtdReservas > 0 &&
-        (int)fwrite(s->reservas, sizeof(Reserva), s->info.qtdReservas, f) != s->info.qtdReservas) {
+
+    if (fwrite(&s->info, sizeof(Cabecalho), 1, f) != 1 ||
+        (s->info.qtdLabs > 0 &&
+         fwrite(s->labs, sizeof(Laboratorio), (size_t)s->info.qtdLabs, f) != (size_t)s->info.qtdLabs) ||
+        (s->info.qtdEquips > 0 &&
+         fwrite(s->equips, sizeof(Equipamento), (size_t)s->info.qtdEquips, f) != (size_t)s->info.qtdEquips) ||
+        (s->info.qtdReservas > 0 &&
+         fwrite(s->reservas, sizeof(Reserva), (size_t)s->info.qtdReservas, f) != (size_t)s->info.qtdReservas)) {
         ok = 0;
     }
     if (fclose(f) != 0) {
         ok = 0;
     }
     if (!ok) {
-        printf("  ATENCAO: falha ao gravar %s.\n", ARQUIVO_DADOS);
+        remove(ARQUIVO_TEMP);
+        printf("  Falha ao gravar os dados.\n");
+        return 0;
     }
+
+    /* Em alguns sistemas o rename nao substitui um arquivo existente. */
+    if (rename(ARQUIVO_TEMP, ARQUIVO_DADOS) != 0) {
+        remove(ARQUIVO_BACKUP);
+        if (rename(ARQUIVO_DADOS, ARQUIVO_BACKUP) != 0) {
+            remove(ARQUIVO_TEMP);
+            printf("  Falha ao substituir o arquivo de dados.\n");
+            return 0;
+        }
+        if (rename(ARQUIVO_TEMP, ARQUIVO_DADOS) != 0) {
+            rename(ARQUIVO_BACKUP, ARQUIVO_DADOS);
+            remove(ARQUIVO_TEMP);
+            printf("  Falha ao substituir o arquivo de dados.\n");
+            return 0;
+        }
+        remove(ARQUIVO_BACKUP);
+    }
+    return 1;
 }
 
 /* Retorna 0 se o arquivo não existe. Se estiver danificado, encerra sem alterá-lo. */
 int carregarDados(Sistema *s) {
     FILE *f = fopen(ARQUIVO_DADOS, "rb");
     int ok = 1;
+    long tamanhoArquivo;
 
     if (f == NULL) {
-        return 0;
+        if (errno != ENOENT) {
+            printf("Nao foi possivel abrir o arquivo de dados.\n");
+            exit(1);
+        }
+        /* Uma interrupcao durante a gravacao pode deixar o backup sem o arquivo principal. */
+        if (rename(ARQUIVO_BACKUP, ARQUIVO_DADOS) != 0) {
+            if (errno != ENOENT) {
+                printf("Nao foi possivel restaurar o backup.\n");
+                exit(1);
+            }
+            return 0;
+        }
+        f = fopen(ARQUIVO_DADOS, "rb");
+        if (f == NULL) {
+            printf("Nao foi possivel recuperar o arquivo de dados.\n");
+            exit(1);
+        }
     }
-    if (fread(&s->info, sizeof(Cabecalho), 1, f) != 1 ||
-        s->info.assinatura != ASSINATURA_ARQUIVO || s->info.qtdLabs < 0 ||
-        s->info.qtdEquips < 0 || s->info.qtdReservas < 0) {
+
+    if (fseek(f, 0, SEEK_END) != 0) {
         ok = 0;
     }
+    tamanhoArquivo = ok ? ftell(f) : -1;
+    if (tamanhoArquivo < 0 || fseek(f, 0, SEEK_SET) != 0) {
+        ok = 0;
+    }
+    if (ok && (fread(&s->info, sizeof(Cabecalho), 1, f) != 1 ||
+        s->info.assinatura != ASSINATURA_ARQUIVO ||
+        s->info.qtdLabs < 0 || s->info.qtdLabs > MAX_ID ||
+        s->info.qtdEquips < 0 || s->info.qtdEquips > MAX_ID ||
+        s->info.qtdReservas < 0 || s->info.qtdReservas > MAX_ID ||
+        s->info.proximoLab < 1 || s->info.proximoEquip < 1 || s->info.proximoReserva < 1 ||
+        s->info.proximoLab > MAX_ID + 1 || s->info.proximoEquip > MAX_ID + 1 ||
+        s->info.proximoReserva > MAX_ID + 1)) {
+        ok = 0;
+    }
+    if (ok) {
+        size_t esperado = sizeof(Cabecalho) +
+            (size_t)s->info.qtdLabs * sizeof(Laboratorio) +
+            (size_t)s->info.qtdEquips * sizeof(Equipamento) +
+            (size_t)s->info.qtdReservas * sizeof(Reserva);
+        if ((size_t)tamanhoArquivo != esperado) {
+            ok = 0;
+        }
+    }
     if (ok && s->info.qtdLabs > 0) {
-        s->labs = malloc(s->info.qtdLabs * sizeof(Laboratorio));
+        s->labs = malloc((size_t)s->info.qtdLabs * sizeof(Laboratorio));
         if (s->labs == NULL ||
-            (int)fread(s->labs, sizeof(Laboratorio), s->info.qtdLabs, f) != s->info.qtdLabs) {
+            fread(s->labs, sizeof(Laboratorio), (size_t)s->info.qtdLabs, f) != (size_t)s->info.qtdLabs) {
             ok = 0;
         }
     }
     if (ok && s->info.qtdEquips > 0) {
-        s->equips = malloc(s->info.qtdEquips * sizeof(Equipamento));
+        s->equips = malloc((size_t)s->info.qtdEquips * sizeof(Equipamento));
         if (s->equips == NULL ||
-            (int)fread(s->equips, sizeof(Equipamento), s->info.qtdEquips, f) != s->info.qtdEquips) {
+            fread(s->equips, sizeof(Equipamento), (size_t)s->info.qtdEquips, f) != (size_t)s->info.qtdEquips) {
             ok = 0;
         }
     }
     if (ok && s->info.qtdReservas > 0) {
-        s->reservas = malloc(s->info.qtdReservas * sizeof(Reserva));
+        s->reservas = malloc((size_t)s->info.qtdReservas * sizeof(Reserva));
         if (s->reservas == NULL ||
-            (int)fread(s->reservas, sizeof(Reserva), s->info.qtdReservas, f) != s->info.qtdReservas) {
+            fread(s->reservas, sizeof(Reserva), (size_t)s->info.qtdReservas, f) != (size_t)s->info.qtdReservas) {
             ok = 0;
+        }
+    }
+    if (ok) {
+        for (int i = 0; i < s->info.qtdReservas; i++) {
+            Reserva *r = &s->reservas[i];
+            if (r->qtdItens < 0 || r->qtdItens > MAX_ITENS || !dataValida(r->data) ||
+                r->inicioMin < HORA_ABERTURA || r->fimMin > HORA_FECHAMENTO ||
+                r->inicioMin >= r->fimMin || r->qtdAlunos < 1 || r->qtdAlunos > MAX_ALUNOS ||
+                (r->status != STATUS_CONFIRMADA && r->status != STATUS_CANCELADA)) {
+                ok = 0;
+                break;
+            }
+            for (int j = 0; j < r->qtdItens; j++) {
+                if (r->itens[j].quantidade < 1 || r->itens[j].quantidade > MAX_ESTOQUE) {
+                    ok = 0;
+                    break;
+                }
+            }
+            if (!ok) {
+                break;
+            }
         }
     }
     fclose(f);
@@ -410,13 +493,13 @@ int carregarDados(Sistema *s) {
     if (!ok) {
         printf("Erro: o arquivo %s esta danificado ou e de outra versao do programa.\n",
                ARQUIVO_DADOS);
-        printf("Renomeie ou apague o arquivo para comecar do zero.\n");
+        printf("Guarde uma copia do arquivo antes de tentar recupera-lo.\n");
         exit(1);
     }
     return 1;
 }
 
-/* ===================== Inclusão nos vetores ============================= */
+/* Inclusão nos vetores */
 
 void erroMemoria(void) {
     printf("Erro: memoria insuficiente.\n");
@@ -424,39 +507,112 @@ void erroMemoria(void) {
 }
 
 void adicionarLab(Sistema *s, Laboratorio novo) {
-    s->labs = realloc(s->labs, (s->info.qtdLabs + 1) * sizeof(Laboratorio));
-    if (s->labs == NULL) {
+    Laboratorio *aumentado = realloc(s->labs, (size_t)(s->info.qtdLabs + 1) * sizeof(Laboratorio));
+    if (aumentado == NULL) {
         erroMemoria();
     }
-    novo.id = s->info.proximoLab;
-    s->info.proximoLab++;
-    s->labs[s->info.qtdLabs] = novo;
-    s->info.qtdLabs++;
+    s->labs = aumentado;
+    novo.id = s->info.proximoLab++;
+    s->labs[s->info.qtdLabs++] = novo;
 }
 
 void adicionarEquip(Sistema *s, Equipamento novo) {
-    s->equips = realloc(s->equips, (s->info.qtdEquips + 1) * sizeof(Equipamento));
-    if (s->equips == NULL) {
+    Equipamento *aumentado = realloc(s->equips, (size_t)(s->info.qtdEquips + 1) * sizeof(Equipamento));
+    if (aumentado == NULL) {
         erroMemoria();
     }
-    novo.id = s->info.proximoEquip;
-    s->info.proximoEquip++;
-    s->equips[s->info.qtdEquips] = novo;
-    s->info.qtdEquips++;
+    s->equips = aumentado;
+    novo.id = s->info.proximoEquip++;
+    s->equips[s->info.qtdEquips++] = novo;
 }
 
 /* Inclui a reserva como confirmada e retorna o ID gerado. */
 int adicionarReserva(Sistema *s, Reserva nova) {
-    s->reservas = realloc(s->reservas, (s->info.qtdReservas + 1) * sizeof(Reserva));
-    if (s->reservas == NULL) {
+    Reserva *aumentado = realloc(s->reservas, (size_t)(s->info.qtdReservas + 1) * sizeof(Reserva));
+    if (aumentado == NULL) {
         erroMemoria();
     }
-    nova.id = s->info.proximoReserva;
+    s->reservas = aumentado;
+    nova.id = s->info.proximoReserva++;
     nova.status = STATUS_CONFIRMADA;
-    s->info.proximoReserva++;
-    s->reservas[s->info.qtdReservas] = nova;
-    s->info.qtdReservas++;
+    s->reservas[s->info.qtdReservas++] = nova;
     return nova.id;
+}
+
+/*
+ * Remocao e restauracao de itens dos vetores.
+ *
+ * Toda alteracao e feita primeiro na memoria e depois gravada com salvarDados.
+ * Se a gravacao falhar, a alteracao precisa ser desfeita; caso contrario, a
+ * tela mostraria um dado que o arquivo nao tem, e a proxima gravacao bem-
+ * sucedida salvaria sem aviso uma operacao que o usuario viu falhar.
+ *
+ * As funcoes "remover" deslocam os itens seguintes e devolvem o item removido.
+ * As funcoes "restaurar" fazem o caminho inverso, recolocando o item na mesma
+ * posicao. Nao e preciso realocar: remover diminui apenas o contador, entao o
+ * espaco do item continua reservado no vetor.
+ */
+Reserva removerReserva(Sistema *s, int posicao) {
+    Reserva removida = s->reservas[posicao];
+
+    for (int i = posicao; i < s->info.qtdReservas - 1; i++) {
+        s->reservas[i] = s->reservas[i + 1];
+    }
+    s->info.qtdReservas--;
+    return removida;
+}
+
+void restaurarReserva(Sistema *s, int posicao, Reserva removida) {
+    for (int i = s->info.qtdReservas; i > posicao; i--) {
+        s->reservas[i] = s->reservas[i - 1];
+    }
+    s->reservas[posicao] = removida;
+    s->info.qtdReservas++;
+}
+
+Laboratorio removerLab(Sistema *s, int posicao) {
+    Laboratorio removido = s->labs[posicao];
+
+    for (int i = posicao; i < s->info.qtdLabs - 1; i++) {
+        s->labs[i] = s->labs[i + 1];
+    }
+    s->info.qtdLabs--;
+    return removido;
+}
+
+void restaurarLab(Sistema *s, int posicao, Laboratorio removido) {
+    for (int i = s->info.qtdLabs; i > posicao; i--) {
+        s->labs[i] = s->labs[i - 1];
+    }
+    s->labs[posicao] = removido;
+    s->info.qtdLabs++;
+}
+
+Equipamento removerEquip(Sistema *s, int posicao) {
+    Equipamento removido = s->equips[posicao];
+
+    for (int i = posicao; i < s->info.qtdEquips - 1; i++) {
+        s->equips[i] = s->equips[i + 1];
+    }
+    s->info.qtdEquips--;
+    return removido;
+}
+
+void restaurarEquip(Sistema *s, int posicao, Equipamento removido) {
+    for (int i = s->info.qtdEquips; i > posicao; i--) {
+        s->equips[i] = s->equips[i - 1];
+    }
+    s->equips[posicao] = removido;
+    s->info.qtdEquips++;
+}
+
+/*
+ * Desfaz inclusoes recentes de reservas: volta o contador e o proximo ID ao
+ * estado anterior. Funciona porque novas reservas sempre entram no fim do vetor.
+ */
+void desfazerInclusaoReservas(Sistema *s, int qtdAnterior, int proximoAnterior) {
+    s->info.qtdReservas = qtdAnterior;
+    s->info.proximoReserva = proximoAnterior;
 }
 
 /* Cadastra exemplos no primeiro uso, para testar o sistema imediatamente. */
@@ -484,7 +640,7 @@ void cadastrarDadosIniciais(Sistema *s) {
     }
 }
 
-/* ======================= Regras de negócio ============================== */
+/* Regras de negócio */
 
 /*
  * Retorna 1 se a reserva está confirmada e coincide com o período. Períodos
@@ -554,6 +710,16 @@ int validarReserva(Sistema *s, Reserva *r, int idIgnorado) {
     int posicaoConflito;
     int valida = 1;
 
+    if (!dataValida(r->data) || r->inicioMin < HORA_ABERTURA ||
+        r->fimMin > HORA_FECHAMENTO || r->inicioMin >= r->fimMin) {
+        printf("  - Data ou horario fora dos limites permitidos.\n");
+        return 0;
+    }
+    if (r->qtdItens < 0 || r->qtdItens > MAX_ITENS ||
+        r->qtdAlunos < 1 || r->qtdAlunos > MAX_ALUNOS) {
+        printf("  - Quantidade de alunos ou itens invalida.\n");
+        return 0;
+    }
     if (horarioJaPassou(r->data, r->inicioMin)) {
         printf("  - O horario informado ja passou.\n");
         valida = 0;
@@ -590,6 +756,10 @@ int validarReserva(Sistema *s, Reserva *r, int idIgnorado) {
             int livres = unidadesLivres(s, &s->equips[posicaoEquip], r->data,
                                         r->inicioMin, r->fimMin, idIgnorado);
 
+            if (r->itens[i].quantidade < 1) {
+                printf("  - Quantidade invalida para %s.\n", s->equips[posicaoEquip].nome);
+                valida = 0;
+            }
             if (r->itens[i].quantidade > livres) {
                 printf("  - %s: pedidas %d unidades, disponiveis %d.\n",
                        s->equips[posicaoEquip].nome, r->itens[i].quantidade, livres);
@@ -600,12 +770,11 @@ int validarReserva(Sistema *s, Reserva *r, int idIgnorado) {
     return valida;
 }
 
-/* Retorna 1 se a reserva está confirmada e ainda não começou. */
 int reservaFutura(Reserva *r) {
     return r->status == STATUS_CONFIRMADA && !horarioJaPassou(r->data, r->inicioMin);
 }
 
-/* ============================ Exibição ================================== */
+/* Exibição */
 
 void imprimirTitulo(char *titulo) {
     printf("\n=== %s ===\n", titulo);
@@ -673,7 +842,6 @@ void listarEquips(Sistema *s) {
     }
 }
 
-/* Mostra cada equipamento com as unidades livres no período. */
 void listarEquipsLivres(Sistema *s, Data d, int inicio, int fim, int idIgnorado) {
     imprimirTitulo("Equipamentos no horario");
     if (s->info.qtdEquips == 0) {
@@ -697,7 +865,7 @@ void exibirDetalhes(Sistema *s, Reserva *r) {
            nomeDiaSemana(r->data), r->data.dia, r->data.mes, r->data.ano,
            r->inicioMin / 60, r->inicioMin % 60, r->fimMin / 60, r->fimMin % 60);
     printf("  Alunos    : %d\n", r->qtdAlunos);
-    if (r->id != 0) { /* ID zero: reserva ainda em preenchimento */
+    if (r->id != 0) { /* Reserva sem ID ainda nao foi confirmada. */
         printf("  Situacao  : %s\n", textoStatus(r->status));
     }
     printf("  Equipamentos:");
@@ -727,7 +895,6 @@ int contemTexto(char *texto, char *procurado) {
     return 0;
 }
 
-/* Retorna 1 se a reserva deve aparecer na listagem pedida. */
 int passaNoFiltro(Reserva *r, int filtro, Data d, char *texto) {
     if (filtro == FILTRO_DATA) {
         return r->status == STATUS_CONFIRMADA && dataInt(r->data) == dataInt(d);
@@ -749,9 +916,8 @@ int vemAntes(Reserva *a, Reserva *b) {
     return a->idLaboratorio < b->idLaboratorio;
 }
 
-/* Exibe em ordem cronológica as reservas que passam no filtro. */
 void listarReservas(Sistema *s, char *titulo, int filtro, Data d, char *texto) {
-    int *lista = malloc((s->info.qtdReservas + 1) * sizeof(int)); /* Posições selecionadas */
+    int *lista = malloc((size_t)(s->info.qtdReservas + 1) * sizeof(int)); /* Indices selecionados */
     int quantidade = 0;
 
     imprimirTitulo(titulo);
@@ -771,7 +937,7 @@ void listarReservas(Sistema *s, char *titulo, int filtro, Data d, char *texto) {
         return;
     }
 
-    /* Ordenação pelo método da bolha */
+    /* Ordena os indices, sem mudar a ordem das reservas armazenadas. */
     for (int i = 0; i < quantidade - 1; i++) {
         for (int j = 0; j < quantidade - 1 - i; j++) {
             if (vemAntes(&s->reservas[lista[j + 1]], &s->reservas[lista[j]])) {
@@ -796,9 +962,8 @@ void listarReservas(Sistema *s, char *titulo, int filtro, Data d, char *texto) {
     free(lista);
 }
 
-/* ===================== CRUD de reservas ================================= */
+/* CRUD de reservas */
 
-/* Pede um laboratório livre que comporte a turma. Retorna 0 se o usuário desistir. */
 int escolherLab(Sistema *s, Reserva *r, int idIgnorado) {
     while (1) {
         int id = lerInteiro("ID do laboratorio (0 para voltar): ", 0, MAX_ID);
@@ -821,7 +986,7 @@ int escolherLab(Sistema *s, Reserva *r, int idIgnorado) {
     }
 }
 
-/* Define os equipamentos da reserva, limitando cada pedido às unidades livres. */
+/* Os equipamentos sao do estoque comum, mesmo quando as aulas sao em labs diferentes. */
 void selecionarEquips(Sistema *s, Reserva *r, int idIgnorado) {
     r->qtdItens = 0;
     if (s->info.qtdEquips == 0 || !lerConfirmacao("Deseja reservar equipamentos?")) {
@@ -870,6 +1035,10 @@ void replicarSemanalmente(Sistema *s, Reserva base, int semanas) {
         Reserva copia = base;
 
         copia.data = somarDias(base.data, 7 * i);
+        if (!dataValida(copia.data)) {
+            printf("Limite de datas atingido.\n");
+            break;
+        }
         printf("Semana de %02d/%02d/%04d:\n", copia.data.dia, copia.data.mes, copia.data.ano);
         if (validarReserva(s, &copia, 0)) {
             printf("  Reserva %d criada.\n", adicionarReserva(s, copia));
@@ -883,7 +1052,7 @@ void replicarSemanalmente(Sistema *s, Reserva base, int semanas) {
 
 void criarReserva(Sistema *s) {
     Reserva nova = {0};
-    int semanas;
+    int semanas, idCriado, qtdAnterior, proximoAnterior;
 
     if (s->info.qtdLabs == 0) {
         printf("Cadastre um laboratorio antes de fazer reservas.\n");
@@ -914,14 +1083,28 @@ void criarReserva(Sistema *s) {
         printf("Reserva nao realizada.\n");
         return;
     }
-    printf("Reserva %d confirmada.\n", adicionarReserva(s, nova));
+    qtdAnterior = s->info.qtdReservas;
+    proximoAnterior = s->info.proximoReserva;
+    idCriado = adicionarReserva(s, nova);
+    if (!salvarDados(s)) {
+        desfazerInclusaoReservas(s, qtdAnterior, proximoAnterior);
+        printf("Reserva nao realizada.\n");
+        return;
+    }
+    printf("Reserva %d confirmada.\n", idCriado);
 
     semanas = lerInteiro("Repetir em quantas semanas seguintes (0 para nenhuma)? ",
                          0, MAX_SEMANAS_EXTRAS);
     if (semanas > 0) {
+        /* A reserva principal ja esta salva; so as copias semanais sao desfeitas. */
+        qtdAnterior = s->info.qtdReservas;
+        proximoAnterior = s->info.proximoReserva;
         replicarSemanalmente(s, nova, semanas);
+        if (!salvarDados(s)) {
+            desfazerInclusaoReservas(s, qtdAnterior, proximoAnterior);
+            printf("As reservas semanais nao foram criadas.\n");
+        }
     }
-    salvarDados(s);
 }
 
 void consultarReserva(Sistema *s) {
@@ -957,7 +1140,7 @@ int escolherAlteravel(Sistema *s) {
 /* Altera uma cópia; o original só muda ao salvar com todas as regras atendidas. */
 void editarReserva(Sistema *s) {
     int posicao = escolherAlteravel(s);
-    Reserva c;
+    Reserva c, original;
 
     if (posicao == -1) {
         return;
@@ -999,13 +1182,19 @@ void editarReserva(Sistema *s) {
             selecionarEquips(s, &c, c.id);
             break;
         case 7:
-            if (validarReserva(s, &c, c.id)) {
-                s->reservas[posicao] = c;
-                salvarDados(s);
+            if (!validarReserva(s, &c, c.id)) {
+                printf("Corrija os problemas acima antes de salvar.\n");
+                break;
+            }
+            original = s->reservas[posicao];
+            s->reservas[posicao] = c;
+            if (salvarDados(s)) {
                 printf("Reserva atualizada.\n");
                 return;
             }
-            printf("Corrija os problemas acima antes de salvar.\n");
+            /* Mantem a versao original e deixa o usuario tentar de novo. */
+            s->reservas[posicao] = original;
+            printf("Alteracoes nao salvas. Tente novamente ou descarte.\n");
             break;
         default:
             printf("Alteracoes descartadas.\n");
@@ -1024,14 +1213,19 @@ void cancelarReserva(Sistema *s) {
     exibirDetalhes(s, &s->reservas[posicao]);
     if (lerConfirmacao("Cancelar esta reserva?")) {
         s->reservas[posicao].status = STATUS_CANCELADA;
-        salvarDados(s);
-        printf("Reserva cancelada. O horario foi liberado.\n");
+        if (salvarDados(s)) {
+            printf("Reserva cancelada. O horario foi liberado.\n");
+        } else {
+            s->reservas[posicao].status = STATUS_CONFIRMADA; /* Desfaz na memoria */
+            printf("Cancelamento nao realizado.\n");
+        }
     }
 }
 
 /* Excluir apaga a reserva do sistema, sem deixar registro. */
 void excluirReserva(Sistema *s) {
     int posicao = buscarReserva(s, lerInteiro("ID da reserva: ", 1, MAX_ID));
+    Reserva removida;
 
     if (posicao == -1) {
         printf("Reserva nao encontrada.\n");
@@ -1041,16 +1235,16 @@ void excluirReserva(Sistema *s) {
     if (!lerConfirmacao("Excluir definitivamente esta reserva?")) {
         return;
     }
-    /* Desloca as reservas seguintes para não deixar buraco no vetor */
-    for (int i = posicao; i < s->info.qtdReservas - 1; i++) {
-        s->reservas[i] = s->reservas[i + 1];
+    removida = removerReserva(s, posicao);
+    if (salvarDados(s)) {
+        printf("Reserva excluida.\n");
+    } else {
+        restaurarReserva(s, posicao, removida);
+        printf("Exclusao nao realizada.\n");
     }
-    s->info.qtdReservas--;
-    salvarDados(s);
-    printf("Reserva excluida.\n");
 }
 
-/* ================== CRUD de laboratórios e equipamentos ================= */
+/* CRUD de laboratórios e equipamentos */
 
 void criarLab(Sistema *s) {
     Laboratorio novo = {0};
@@ -1061,8 +1255,14 @@ void criarLab(Sistema *s) {
     lerTexto("Tipo: ", novo.tipo, TAM_NOME);
     novo.capacidade = lerInteiro("Capacidade de alunos: ", 1, MAX_ALUNOS);
     adicionarLab(s, novo);
-    salvarDados(s);
-    printf("Laboratorio cadastrado.\n");
+    if (salvarDados(s)) {
+        printf("Laboratorio cadastrado.\n");
+    } else {
+        /* O novo laboratorio e o ultimo do vetor e recebeu o ultimo ID. */
+        s->info.qtdLabs--;
+        s->info.proximoLab--;
+        printf("Cadastro nao realizado.\n");
+    }
 }
 
 /* A capacidade não pode ficar menor que a maior turma com reserva futura. */
@@ -1070,13 +1270,14 @@ void editarLab(Sistema *s) {
     int posicao = buscarLab(s, lerInteiro("ID do laboratorio: ", 1, MAX_ID));
     int maiorTurma = 0;
     int minimo = 1;
-    Laboratorio *l;
+    Laboratorio *l, original;
 
     if (posicao == -1) {
         printf("Laboratorio nao encontrado.\n");
         return;
     }
     l = &s->labs[posicao];
+    original = *l; /* Copia para desfazer a edicao se a gravacao falhar */
 
     for (int i = 0; i < s->info.qtdReservas; i++) {
         Reserva *r = &s->reservas[i];
@@ -1093,12 +1294,17 @@ void editarLab(Sistema *s) {
         minimo = maiorTurma;
     }
     l->capacidade = lerInteiro("Nova capacidade: ", minimo, MAX_ALUNOS);
-    salvarDados(s);
-    printf("Laboratorio atualizado.\n");
+    if (salvarDados(s)) {
+        printf("Laboratorio atualizado.\n");
+    } else {
+        *l = original;
+        printf("Alteracoes nao realizadas.\n");
+    }
 }
 
 void excluirLab(Sistema *s) {
     int posicao = buscarLab(s, lerInteiro("ID do laboratorio: ", 1, MAX_ID));
+    Laboratorio removido;
 
     if (posicao == -1) {
         printf("Laboratorio nao encontrado.\n");
@@ -1114,12 +1320,13 @@ void excluirLab(Sistema *s) {
     if (!lerConfirmacao("Excluir este laboratorio?")) {
         return;
     }
-    for (int i = posicao; i < s->info.qtdLabs - 1; i++) {
-        s->labs[i] = s->labs[i + 1];
+    removido = removerLab(s, posicao);
+    if (salvarDados(s)) {
+        printf("Laboratorio excluido.\n");
+    } else {
+        restaurarLab(s, posicao, removido);
+        printf("Exclusao nao realizada.\n");
     }
-    s->info.qtdLabs--;
-    salvarDados(s);
-    printf("Laboratorio excluido.\n");
 }
 
 void criarEquip(Sistema *s) {
@@ -1130,8 +1337,14 @@ void criarEquip(Sistema *s) {
     lerTexto("Categoria: ", novo.categoria, TAM_NOME);
     novo.quantidadeTotal = lerInteiro("Quantidade total: ", 1, MAX_ESTOQUE);
     adicionarEquip(s, novo);
-    salvarDados(s);
-    printf("Equipamento cadastrado.\n");
+    if (salvarDados(s)) {
+        printf("Equipamento cadastrado.\n");
+    } else {
+        /* O novo equipamento e o ultimo do vetor e recebeu o ultimo ID. */
+        s->info.qtdEquips--;
+        s->info.proximoEquip--;
+        printf("Cadastro nao realizado.\n");
+    }
 }
 
 /* O total não pode ficar menor que o maior uso simultâneo em reservas futuras. */
@@ -1139,13 +1352,14 @@ void editarEquip(Sistema *s) {
     int posicao = buscarEquip(s, lerInteiro("ID do equipamento: ", 1, MAX_ID));
     int maiorUso = 0;
     int minimo = 1;
-    Equipamento *e;
+    Equipamento *e, original;
 
     if (posicao == -1) {
         printf("Equipamento nao encontrado.\n");
         return;
     }
     e = &s->equips[posicao];
+    original = *e; /* Copia para desfazer a edicao se a gravacao falhar */
 
     for (int i = 0; i < s->info.qtdReservas; i++) {
         Reserva *r = &s->reservas[i];
@@ -1165,12 +1379,17 @@ void editarEquip(Sistema *s) {
         minimo = maiorUso;
     }
     e->quantidadeTotal = lerInteiro("Nova quantidade total: ", minimo, MAX_ESTOQUE);
-    salvarDados(s);
-    printf("Equipamento atualizado.\n");
+    if (salvarDados(s)) {
+        printf("Equipamento atualizado.\n");
+    } else {
+        *e = original;
+        printf("Alteracoes nao realizadas.\n");
+    }
 }
 
 void excluirEquip(Sistema *s) {
     int posicao = buscarEquip(s, lerInteiro("ID do equipamento: ", 1, MAX_ID));
+    Equipamento removido;
 
     if (posicao == -1) {
         printf("Equipamento nao encontrado.\n");
@@ -1186,15 +1405,16 @@ void excluirEquip(Sistema *s) {
     if (!lerConfirmacao("Excluir este equipamento?")) {
         return;
     }
-    for (int i = posicao; i < s->info.qtdEquips - 1; i++) {
-        s->equips[i] = s->equips[i + 1];
+    removido = removerEquip(s, posicao);
+    if (salvarDados(s)) {
+        printf("Equipamento excluido.\n");
+    } else {
+        restaurarEquip(s, posicao, removido);
+        printf("Exclusao nao realizada.\n");
     }
-    s->info.qtdEquips--;
-    salvarDados(s);
-    printf("Equipamento excluido.\n");
 }
 
-/* ===================== Consultas e relatórios =========================== */
+/* Consultas e relatórios */
 
 void listarTodasReservas(Sistema *s) {
     Data semData = {0, 0, 0};
@@ -1229,39 +1449,11 @@ void consultarDisponibilidade(Sistema *s) {
     listarEquipsLivres(s, d, inicio, fim, 0);
 }
 
-int maiorValor(int *valores, int quantidade) {
-    int maior = 0;
-
-    for (int i = 0; i < quantidade; i++) {
-        if (valores[i] > maior) {
-            maior = valores[i];
-        }
-    }
-    return maior;
-}
-
-/* Desenha uma barra proporcional; valores pequenos continuam visíveis. */
-void imprimirBarra(int valor, int maximo) {
-    int tamanho = 0;
-
-    if (maximo > 0) {
-        tamanho = valor * LARGURA_GRAFICO / maximo;
-    }
-    if (valor > 0 && tamanho == 0) {
-        tamanho = 1;
-    }
-    for (int i = 0; i < tamanho; i++) {
-        printf("#");
-    }
-    printf("\n");
-}
-
 void exibirRelatorio(Sistema *s) {
     int confirmadas = 0;
     int canceladas = 0;
-    /* calloc cria os vetores zerados; o "+ 1" evita pedir tamanho zero */
-    int *minutos = calloc(s->info.qtdLabs + 1, sizeof(int));
-    int *unidades = calloc(s->info.qtdEquips + 1, sizeof(int));
+        int *minutos = calloc((size_t)s->info.qtdLabs + 1, sizeof(int));
+    int *unidades = calloc((size_t)s->info.qtdEquips + 1, sizeof(int));
 
     if (minutos == NULL || unidades == NULL) {
         printf("Memoria insuficiente para gerar o relatorio.\n");
@@ -1277,13 +1469,15 @@ void exibirRelatorio(Sistema *s) {
             continue;
         }
         confirmadas++;
-        for (int j = 0; j < s->info.qtdLabs; j++) {
-            if (s->labs[j].id == r->idLaboratorio) {
-                minutos[j] += r->fimMin - r->inicioMin;
-            }
+        int posLab = buscarLab(s, r->idLaboratorio);
+        if (posLab != -1) {
+            minutos[posLab] += r->fimMin - r->inicioMin;
         }
-        for (int j = 0; j < s->info.qtdEquips; j++) {
-            unidades[j] += qtdNaReserva(r, s->equips[j].id);
+        for (int j = 0; j < r->qtdItens; j++) {
+            int posEquip = buscarEquip(s, r->itens[j].idEquipamento);
+            if (posEquip != -1) {
+                unidades[posEquip] += r->itens[j].quantidade;
+            }
         }
     }
 
@@ -1293,20 +1487,18 @@ void exibirRelatorio(Sistema *s) {
 
     imprimirTitulo("Horas reservadas por laboratorio");
     for (int i = 0; i < s->info.qtdLabs; i++) {
-        printf("%-22.22s %4d:%02d h  ", s->labs[i].nome, minutos[i] / 60, minutos[i] % 60);
-        imprimirBarra(minutos[i], maiorValor(minutos, s->info.qtdLabs));
+        printf("%-22.22s %d h %02d min\n", s->labs[i].nome, minutos[i] / 60, minutos[i] % 60);
     }
 
-    imprimirTitulo("Unidades reservadas por equipamento");
+    imprimirTitulo("Total de unidades solicitadas por equipamento");
     for (int i = 0; i < s->info.qtdEquips; i++) {
-        printf("%-22.22s %6d un  ", s->equips[i].nome, unidades[i]);
-        imprimirBarra(unidades[i], maiorValor(unidades, s->info.qtdEquips));
+        printf("%-22.22s %d unidades\n", s->equips[i].nome, unidades[i]);
     }
     free(minutos);
     free(unidades);
 }
 
-/* =============================== Menus ================================== */
+/* Menus */
 
 void menuReservas(Sistema *s) {
     while (1) {
@@ -1389,23 +1581,21 @@ void menuConsultas(Sistema *s) {
 }
 
 int main(void) {
-    Sistema s;
+    Sistema s = {0};
     int executando = 1;
 
     s.info.assinatura = ASSINATURA_ARQUIVO;
     s.info.proximoLab = 1;
     s.info.proximoEquip = 1;
     s.info.proximoReserva = 1;
-    s.info.qtdLabs = 0;
-    s.info.qtdEquips = 0;
-    s.info.qtdReservas = 0;
-    s.labs = NULL;
-    s.equips = NULL;
-    s.reservas = NULL;
 
     if (!carregarDados(&s)) {
         cadastrarDadosIniciais(&s);
-        salvarDados(&s);
+        if (!salvarDados(&s)) {
+            free(s.labs);
+            free(s.equips);
+            return 1;
+        }
     }
 
     printf("==============================================\n");
