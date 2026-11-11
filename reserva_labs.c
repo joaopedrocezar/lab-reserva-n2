@@ -638,8 +638,7 @@ void cadastrarDadosIniciais(Sistema *s) {
 
 /* Regras de negócio */
 
-/* Períodos que apenas encostam não conflitam.
- * idIgnorado evita que uma edição conflite com a própria reserva. */
+/* O idIgnorado evita que uma reserva em edição conflite com ela mesma. */
 int ocupaTurno(Reserva *r, Data d, int turno, int idIgnorado) {
     return r->id != idIgnorado && r->status == STATUS_CONFIRMADA &&
            dataInt(r->data) == dataInt(d) && r->turno == turno;
@@ -664,8 +663,6 @@ int qtdNaReserva(Reserva *r, int idEquip) {
     return 0;
 }
 
-/* Calcula o maior uso simultâneo do equipamento durante o período.
- * Somar todas as reservas seria incorreto quando seus horários são diferentes. */
 /* Soma as unidades reservadas no mesmo dia e turno, em qualquer laboratório. */
 int unidadesEmUso(Sistema *s, int idEquip, Data d, int turno, int idIgnorado) {
     int uso = 0;
@@ -774,13 +771,13 @@ void listarLabs(Sistema *s) {
     }
 }
 
-int listarLabsLivres(Sistema *s, Data d, int inicio, int fim, int alunos, int idIgnorado) {
+int listarLabsLivres(Sistema *s, Data d, int turno, int alunos, int idIgnorado) {
     int achados = 0;
 
-    imprimirTitulo("Laboratorios livres no horario");
+    imprimirTitulo("Laboratorios disponiveis");
     for (int i = 0; i < s->info.qtdLabs; i++) {
         if (s->labs[i].capacidade >= alunos &&
-            conflitoLab(s, s->labs[i].id, d, inicio, fim, idIgnorado) == -1) {
+            conflitoLab(s, s->labs[i].id, d, turno, idIgnorado) == -1) {
             if (achados == 0) {
                 imprimirCabecalhoLabs();
             }
@@ -789,7 +786,7 @@ int listarLabsLivres(Sistema *s, Data d, int inicio, int fim, int alunos, int id
         }
     }
     if (achados == 0) {
-        printf("Nenhum laboratorio disponivel.\n");
+        printf("Nenhum laboratorio disponivel para esses criterios.\n");
     }
     return achados;
 }
@@ -807,8 +804,8 @@ void listarEquips(Sistema *s) {
     }
 }
 
-void listarEquipsLivres(Sistema *s, Data d, int inicio, int fim, int idIgnorado) {
-    imprimirTitulo("Equipamentos no horario");
+void listarEquipsLivres(Sistema *s, Data d, int turno, int idIgnorado) {
+    imprimirTitulo("Equipamentos disponiveis");
     if (s->info.qtdEquips == 0) {
         printf("Nenhum equipamento cadastrado.\n");
         return;
@@ -817,7 +814,7 @@ void listarEquipsLivres(Sistema *s, Data d, int inicio, int fim, int idIgnorado)
     for (int i = 0; i < s->info.qtdEquips; i++) {
         printf("%-4d %-28.28s %-20.20s %d/%d\n", s->equips[i].id, s->equips[i].nome,
                s->equips[i].categoria,
-               unidadesLivres(s, &s->equips[i], d, inicio, fim, idIgnorado),
+               unidadesLivres(s, &s->equips[i], d, turno, idIgnorado),
                s->equips[i].quantidadeTotal);
     }
 }
@@ -826,11 +823,11 @@ void exibirDetalhes(Sistema *s, Reserva *r) {
     printf("  Professor : %s (matricula %s)\n", r->professor, r->matricula);
     printf("  Disciplina: %s\n", r->disciplina);
     printf("  Lab       : %s\n", nomeLab(s, r->idLaboratorio));
-    printf("  Quando    : %s, %02d/%02d/%04d, das %02d:%02d as %02d:%02d\n",
-           nomeDiaSemana(r->data), r->data.dia, r->data.mes, r->data.ano,
-           r->inicioMin / 60, r->inicioMin % 60, r->fimMin / 60, r->fimMin % 60);
+    printf("  Data      : %s, %02d/%02d/%04d\n",
+           nomeDiaSemana(r->data), r->data.dia, r->data.mes, r->data.ano);
+    printf("  Turno     : %s\n", nomeTurno(r->turno));
     printf("  Alunos    : %d\n", r->qtdAlunos);
-    if (r->id != 0) { /* ID zero indica uma reserva ainda não cadastrada. */
+    if (r->id != 0) {
         printf("  Situacao  : %s\n", textoStatus(r->status));
     }
     printf("  Equipamentos:");
@@ -874,8 +871,8 @@ int vemAntes(Reserva *a, Reserva *b) {
     if (dataInt(a->data) != dataInt(b->data)) {
         return dataInt(a->data) < dataInt(b->data);
     }
-    if (a->inicioMin != b->inicioMin) {
-        return a->inicioMin < b->inicioMin;
+    if (a->turno != b->turno) {
+        return a->turno < b->turno;
     }
     return a->idLaboratorio < b->idLaboratorio;
 }
@@ -912,16 +909,15 @@ void listarReservas(Sistema *s, char *titulo, int filtro, Data d, char *texto) {
         }
     }
 
-    printf("%-4s %-10s %-11s %-20s %-20s %-18s %-6s %s\n", "ID", "Data", "Horario",
+    printf("%-4s %-10s %-8s %-20s %-20s %-18s %-6s %s\n", "ID", "Data", "Turno",
            "Laboratorio", "Professor", "Disciplina", "Alunos", "Situacao");
     for (int i = 0; i < quantidade; i++) {
         Reserva *r = &s->reservas[lista[i]];
 
-        printf("%-4d %02d/%02d/%04d %02d:%02d-%02d:%02d %-20.20s %-20.20s %-18.18s %-6d %s\n",
+        printf("%-4d %02d/%02d/%04d %-8s %-20.20s %-20.20s %-18.18s %-6d %s\n",
                r->id, r->data.dia, r->data.mes, r->data.ano,
-               r->inicioMin / 60, r->inicioMin % 60, r->fimMin / 60, r->fimMin % 60,
-               nomeLab(s, r->idLaboratorio), r->professor, r->disciplina,
-               r->qtdAlunos, textoStatus(r->status));
+               nomeTurno(r->turno), nomeLab(s, r->idLaboratorio), r->professor,
+               r->disciplina, r->qtdAlunos, textoStatus(r->status));
     }
     free(lista);
 }
@@ -941,8 +937,8 @@ int escolherLab(Sistema *s, Reserva *r, int idIgnorado) {
             printf("  Laboratorio nao encontrado.\n");
         } else if (s->labs[posicao].capacidade < r->qtdAlunos) {
             printf("  Este laboratorio comporta apenas %d alunos.\n", s->labs[posicao].capacidade);
-        } else if (conflitoLab(s, id, r->data, r->inicioMin, r->fimMin, idIgnorado) != -1) {
-            printf("  Este laboratorio ja esta ocupado nesse horario.\n");
+        } else if (conflitoLab(s, id, r->data, r->turno, idIgnorado) != -1) {
+            printf("  Este laboratorio ja esta ocupado nesse turno.\n");
         } else {
             r->idLaboratorio = id;
             return 1;
@@ -952,15 +948,23 @@ int escolherLab(Sistema *s, Reserva *r, int idIgnorado) {
 
 /* O estoque de equipamentos é compartilhado entre os laboratórios. */
 void selecionarEquips(Sistema *s, Reserva *r, int idIgnorado) {
-    r->qtdItens = 0;
-    if (s->info.qtdEquips == 0 || !lerConfirmacao("Deseja reservar equipamentos?")) {
+    int opcao;
+    printf("\nEquipamentos atualmente selecionados: %d tipo(s).\n", r->qtdItens);
+    opcao = lerConfirmacao("Deseja selecionar equipamentos?");
+    if (!opcao) {
+        r->qtdItens = 0;
         return;
     }
-    listarEquipsLivres(s, r->data, r->inicioMin, r->fimMin, idIgnorado);
+    r->qtdItens = 0;
+    if (s->info.qtdEquips == 0) {
+        printf("Nenhum equipamento cadastrado.\n");
+        return;
+    }
+    listarEquipsLivres(s, r->data, r->turno, idIgnorado);
 
     while (r->qtdItens < MAX_ITENS) {
         char pergunta[64];
-        int livres, posicao;
+        int posicao;
         int indice = 0;
         int id = lerInteiro("ID do equipamento (0 para concluir): ", 0, MAX_ID);
 
@@ -972,9 +976,9 @@ void selecionarEquips(Sistema *s, Reserva *r, int idIgnorado) {
             printf("  Equipamento nao encontrado.\n");
             continue;
         }
-        livres = unidadesLivres(s, &s->equips[posicao], r->data, r->inicioMin, r->fimMin, idIgnorado);
+        int livres = unidadesLivres(s, &s->equips[posicao], r->data, r->turno, idIgnorado);
         if (livres == 0) {
-            printf("  Nao ha unidades livres nesse horario.\n");
+            printf("  Nao ha unidades livres nesse turno.\n");
             continue;
         }
         while (indice < r->qtdItens && r->itens[indice].idEquipamento != id) {
@@ -987,7 +991,7 @@ void selecionarEquips(Sistema *s, Reserva *r, int idIgnorado) {
             r->qtdItens++;
         }
     }
-    printf("  Limite de %d equipamentos por reserva atingido.\n", MAX_ITENS);
+    printf("  Limite de %d tipos de equipamento por reserva atingido.\n", MAX_ITENS);
 }
 
 /* Cada semana é validada separadamente; um conflito não bloqueia as demais. */
@@ -1084,7 +1088,6 @@ void consultarReserva(Sistema *s) {
 /* Só permite alterar reservas confirmadas que ainda não começaram. */
 int escolherAlteravel(Sistema *s) {
     int posicao = buscarReserva(s, lerInteiro("ID da reserva: ", 1, MAX_ID));
-
     if (posicao == -1) {
         printf("Reserva nao encontrada.\n");
         return -1;
@@ -1093,8 +1096,8 @@ int escolherAlteravel(Sistema *s) {
         printf("Esta reserva ja foi cancelada.\n");
         return -1;
     }
-    if (horarioJaPassou(s->reservas[posicao].data, s->reservas[posicao].inicioMin)) {
-        printf("Esta reserva ja comecou ou ja ocorreu.\n");
+    if (dataJaPassou(s->reservas[posicao].data)) {
+        printf("Esta reserva ja ocorreu.\n");
         return -1;
     }
     return posicao;
@@ -1175,7 +1178,7 @@ void cancelarReserva(Sistema *s) {
     if (lerConfirmacao("Cancelar esta reserva?")) {
         s->reservas[posicao].status = STATUS_CANCELADA;
         if (salvarDados(s)) {
-            printf("Reserva cancelada. O horario foi liberado.\n");
+            printf("Reserva cancelada. O turno foi liberado.\n");
         } else {
             s->reservas[posicao].status = STATUS_CONFIRMADA;
             printf("Cancelamento nao realizado.\n");
@@ -1305,7 +1308,7 @@ void criarEquip(Sistema *s) {
     }
 }
 
-/* O total não pode ficar menor que o maior uso simultâneo em reservas futuras. */
+/* O estoque total não pode ser menor que o uso de um turno já reservado. */
 void editarEquip(Sistema *s) {
     int posicao = buscarEquip(s, lerInteiro("ID do equipamento: ", 1, MAX_ID));
     int maiorUso = 0;
@@ -1323,7 +1326,7 @@ void editarEquip(Sistema *s) {
         Reserva *r = &s->reservas[i];
 
         if (reservaFutura(r) && qtdNaReserva(r, e->id) > 0) {
-            int uso = usoMaximo(s, e->id, r->data, r->inicioMin, r->fimMin, 0);
+            int uso = unidadesEmUso(s, e->id, r->data, r->turno, 0);
 
             if (uso > maiorUso) {
                 maiorUso = uso;
@@ -1399,23 +1402,26 @@ void buscarPorProfessor(Sistema *s) {
 
 void consultarDisponibilidade(Sistema *s) {
     Data d;
-    int inicio, fim;
+    int turno;
 
     lerData("Data (DD/MM/AAAA): ", &d);
-    lerPeriodo(&inicio, &fim);
-    listarLabsLivres(s, d, inicio, fim, 0, 0);
-    listarEquipsLivres(s, d, inicio, fim, 0);
+    turno = lerTurno();
+    if (turno == 0) {
+        return;
+    }
+    printf("Data: %02d/%02d/%04d - %s\n", d.dia, d.mes, d.ano, nomeTurno(turno));
+    listarLabsLivres(s, d, turno, 0, 0);
+    listarEquipsLivres(s, d, turno, 0);
 }
 
 void exibirRelatorio(Sistema *s) {
-    int confirmadas = 0;
-    int canceladas = 0;
-        int *minutos = calloc((size_t)s->info.qtdLabs + 1, sizeof(int));
+    int confirmadas = 0, canceladas = 0;
+    int *turnos = calloc((size_t)s->info.qtdLabs + 1, sizeof(int));
     int *unidades = calloc((size_t)s->info.qtdEquips + 1, sizeof(int));
 
-    if (minutos == NULL || unidades == NULL) {
+    if (turnos == NULL || unidades == NULL) {
         printf("Memoria insuficiente para gerar o relatorio.\n");
-        free(minutos);
+        free(turnos);
         free(unidades);
         return;
     }
@@ -1429,7 +1435,7 @@ void exibirRelatorio(Sistema *s) {
         confirmadas++;
         int posLab = buscarLab(s, r->idLaboratorio);
         if (posLab != -1) {
-            minutos[posLab] += r->fimMin - r->inicioMin;
+            turnos[posLab]++;
         }
         for (int j = 0; j < r->qtdItens; j++) {
             int posEquip = buscarEquip(s, r->itens[j].idEquipamento);
@@ -1443,16 +1449,15 @@ void exibirRelatorio(Sistema *s) {
     printf("Reservas confirmadas: %d\n", confirmadas);
     printf("Reservas canceladas : %d\n", canceladas);
 
-    imprimirTitulo("Horas reservadas por laboratorio");
+    imprimirTitulo("Turnos reservados por laboratorio");
     for (int i = 0; i < s->info.qtdLabs; i++) {
-        printf("%-22.22s %d h %02d min\n", s->labs[i].nome, minutos[i] / 60, minutos[i] % 60);
+        printf("%-22.22s %d turnos\n", s->labs[i].nome, turnos[i]);
     }
-
     imprimirTitulo("Total de unidades solicitadas por equipamento");
     for (int i = 0; i < s->info.qtdEquips; i++) {
         printf("%-22.22s %d unidades\n", s->equips[i].nome, unidades[i]);
     }
-    free(minutos);
+    free(turnos);
     free(unidades);
 }
 
