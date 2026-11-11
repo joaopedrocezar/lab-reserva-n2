@@ -512,44 +512,6 @@ int adicionarReserva(Sistema *s, Reserva nova) {
     return nova.id;
 }
 
-
-void erroMemoria(void) {
-    printf("Erro: memoria insuficiente.\n");
-    exit(1);
-}
-
-void adicionarLab(Sistema *s, Laboratorio novo) {
-    Laboratorio *aumentado = realloc(s->labs, (size_t)(s->info.qtdLabs + 1) * sizeof(Laboratorio));
-    if (aumentado == NULL) {
-        erroMemoria();
-    }
-    s->labs = aumentado;
-    novo.id = s->info.proximoLab++;
-    s->labs[s->info.qtdLabs++] = novo;
-}
-
-void adicionarEquip(Sistema *s, Equipamento novo) {
-    Equipamento *aumentado = realloc(s->equips, (size_t)(s->info.qtdEquips + 1) * sizeof(Equipamento));
-    if (aumentado == NULL) {
-        erroMemoria();
-    }
-    s->equips = aumentado;
-    novo.id = s->info.proximoEquip++;
-    s->equips[s->info.qtdEquips++] = novo;
-}
-
-int adicionarReserva(Sistema *s, Reserva nova) {
-    Reserva *aumentado = realloc(s->reservas, (size_t)(s->info.qtdReservas + 1) * sizeof(Reserva));
-    if (aumentado == NULL) {
-        erroMemoria();
-    }
-    s->reservas = aumentado;
-    nova.id = s->info.proximoReserva++;
-    nova.status = STATUS_CONFIRMADA;
-    s->reservas[s->info.qtdReservas++] = nova;
-    return nova.id;
-}
-
 /* Se o salvamento falhar, os registros removidos voltam à mesma posição.
  * A remoção reduz a contagem, mas mantém espaço para restaurá-los. */
 Reserva removerReserva(Sistema *s, int posicao) {
