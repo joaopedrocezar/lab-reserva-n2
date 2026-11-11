@@ -12,12 +12,12 @@
 #define ARQUIVO_DADOS      "reservas_lab.dat"
 #define ARQUIVO_TEMP       "reservas_lab.tmp"
 #define ARQUIVO_BACKUP     "reservas_lab.bak"
-#define ASSINATURA_ARQUIVO 0x4C414231 /* Identifica o formato LAB1 do arquivo. */
+#define ASSINATURA_ARQUIVO 0x4C414231 /* Assinatura LAB1 para reconhecer o arquivo de dados. */
 
 #define TAM_NOME           60
 #define TAM_CURTO          20
 #define MAX_ITENS          10
-#define HORA_ABERTURA      (7 * 60)  /* Em minutos desde a meia-noite */
+#define HORA_ABERTURA      (7 * 60)  /* Horários representados em minutos desde a meia-noite. */
 #define HORA_FECHAMENTO    (23 * 60)
 #define MAX_ID             1000000
 #define MAX_ALUNOS         500
@@ -62,13 +62,13 @@ typedef struct {
     ItemReserva   itens[MAX_ITENS];
 } Reserva;
 
-/* Gravado no início do arquivo de dados. */
+/* Cabeçalho do arquivo: assinatura, contagens e próximos IDs. */
 typedef struct {
     int assinatura, proximoLab, proximoEquip, proximoReserva;
     int qtdLabs, qtdEquips, qtdReservas;
 } Cabecalho;
 
-/* Reúne os cadastros e seus contadores, sem variáveis globais. */
+/* Reúne os cadastros em vetores dinâmicos, sem variáveis globais. */
 typedef struct {
     Cabecalho    info;
     Laboratorio *labs;
@@ -93,7 +93,7 @@ void aparar(char *texto) {
     memmove(texto, inicio, (size_t)(fim - inicio) + 1);
 }
 
-/* Devolve 0 quando a linha não cabe no campo informado. */
+/* Rejeita entradas maiores que o campo e descarta o restante da linha. */
 int lerLinha(char *destino, int tamanho) {
     char *quebra;
 
@@ -142,7 +142,6 @@ int lerInteiro(char *pergunta, int minimo, int maximo) {
         if (!lerLinha(linha, 32)) {
             continue;
         }
-        /* %c detecta caracteres extras após o numero. */
         if (sscanf(linha, "%9d%c", &valor, &sobra) == 1 &&
             valor >= minimo && valor <= maximo) {
             return valor;
@@ -188,7 +187,7 @@ int dataValida(Data d) {
            d.dia >= 1 && d.dia <= diasNoMes(d.mes, d.ano);
 }
 
-/* Converte a data em AAAAMMDD, que pode ser comparado diretamente. */
+/* Representa a data como AAAAMMDD para comparar datas como inteiros. */
 int dataInt(Data d) {
     return d.ano * 10000 + d.mes * 100 + d.dia;
 }
@@ -206,7 +205,6 @@ Data somarDias(Data d, int dias) {
     return d;
 }
 
-/* Conta os dias desde 01/01/2000, que foi um sábado. */
 char *nomeDiaSemana(Data d) {
     char *nomes[7] = {"Sabado", "Domingo", "Segunda", "Terca", "Quarta", "Quinta", "Sexta"};
     int totalDias = d.dia - 1;
@@ -228,7 +226,7 @@ int horarioJaPassou(Data d, int minutos) {
     int hoje;
 
     if (t == NULL) {
-        return 0; /* Sem relógio confiável, a verificação não é aplicada */
+        return 0;
     }
     hoje = (t->tm_year + 1900) * 10000 + (t->tm_mon + 1) * 100 + t->tm_mday;
 
@@ -254,7 +252,6 @@ void lerData(char *pergunta, Data *d) {
     }
 }
 
-/* Lê um horário HH:MM e devolve os minutos desde a meia-noite. */
 int lerHorario(char *pergunta) {
     char linha[32], sobra;
     int hora, minuto;
@@ -299,7 +296,7 @@ void lerDataEPeriodo(Reserva *r) {
 
 /* Busca nos vetores */
 
-/* O ID identifica o registro mesmo que sua posição no vetor mude após uma exclusão. */
+/* Os IDs permanecem fixos mesmo quando uma exclusão muda as posições nos vetores. */
 int buscarLab(Sistema *s, int id) {
     for (int i = 0; i < s->info.qtdLabs; i++) {
         if (s->labs[i].id == id) {
@@ -347,7 +344,7 @@ char *nomeEquip(Sistema *s, int id) {
 
 /* Arquivo binário */
 
-/* Grava primeiro em um arquivo temporário para preservar o arquivo anterior. */
+/* Grava primeiro no .tmp para não danificar o .dat se a escrita falhar. */
 int salvarDados(Sistema *s) {
     FILE *f = fopen(ARQUIVO_TEMP, "wb");
     int ok = 1;
@@ -375,7 +372,7 @@ int salvarDados(Sistema *s) {
         return 0;
     }
 
-    /* No Windows, rename não substitui diretamente um arquivo existente. */
+    /* No Windows, rename não substitui o .dat existente; o .bak permite a troca. */
     if (rename(ARQUIVO_TEMP, ARQUIVO_DADOS) != 0) {
         remove(ARQUIVO_BACKUP);
         if (rename(ARQUIVO_DADOS, ARQUIVO_BACKUP) != 0) {
@@ -394,7 +391,7 @@ int salvarDados(Sistema *s) {
     return 1;
 }
 
-/* Retorna 0 se o arquivo não existe. Se estiver danificado, encerra sem alterá-lo. */
+/* Retorna 0 se não houver arquivo; se estiver inválido, encerra sem sobrescrevê-lo. */
 int carregarDados(Sistema *s) {
     FILE *f = fopen(ARQUIVO_DADOS, "rb");
     int ok = 1;
@@ -405,7 +402,7 @@ int carregarDados(Sistema *s) {
             printf("Nao foi possivel abrir o arquivo de dados.\n");
             exit(1);
         }
-        /* Se a substituição foi interrompida, restaura o arquivo anterior. */
+        /* Recupera o .bak se uma interrupção deixou o programa sem o .dat. */
         if (rename(ARQUIVO_BACKUP, ARQUIVO_DADOS) != 0) {
             if (errno != ENOENT) {
                 printf("Nao foi possivel restaurar o backup.\n");
@@ -499,7 +496,7 @@ int carregarDados(Sistema *s) {
     return 1;
 }
 
-/* Inclusão nos vetores */
+/* Cadastros em vetores dinâmicos, ampliados com realloc. */
 
 void erroMemoria(void) {
     printf("Erro: memoria insuficiente.\n");
@@ -526,7 +523,6 @@ void adicionarEquip(Sistema *s, Equipamento novo) {
     s->equips[s->info.qtdEquips++] = novo;
 }
 
-/* Inclui a reserva como confirmada e retorna o ID gerado. */
 int adicionarReserva(Sistema *s, Reserva nova) {
     Reserva *aumentado = realloc(s->reservas, (size_t)(s->info.qtdReservas + 1) * sizeof(Reserva));
     if (aumentado == NULL) {
@@ -539,10 +535,8 @@ int adicionarReserva(Sistema *s, Reserva nova) {
     return nova.id;
 }
 
-/*
- * Desfaz alterações na memória quando a gravação falha.
- * A remoção preserva o espaço alocado para restaurar o item na mesma posição.
- */
+/* Se o salvamento falhar, os registros removidos voltam à mesma posição.
+ * A remoção reduz a contagem, mas mantém espaço para restaurá-los. */
 Reserva removerReserva(Sistema *s, int posicao) {
     Reserva removida = s->reservas[posicao];
 
@@ -597,16 +591,12 @@ void restaurarEquip(Sistema *s, int posicao, Equipamento removido) {
     s->info.qtdEquips++;
 }
 
-/*
- * Restaura a contagem e o próximo ID após falha ao salvar novas reservas.
- * Isso funciona porque as inclusões são feitas no fim do vetor.
- */
+/* Como novas reservas entram no fim, basta restaurar a contagem e o próximo ID. */
 void desfazerInclusaoReservas(Sistema *s, int qtdAnterior, int proximoAnterior) {
     s->info.qtdReservas = qtdAnterior;
     s->info.proximoReserva = proximoAnterior;
 }
 
-/* Cadastra exemplos no primeiro uso, para testar o sistema imediatamente. */
 void cadastrarDadosIniciais(Sistema *s) {
     Laboratorio labs[4] = {
         {0, "Lab Informatica 1", "A", "Informatica", 30},
@@ -633,17 +623,13 @@ void cadastrarDadosIniciais(Sistema *s) {
 
 /* Regras de negócio */
 
-/*
- * Retorna 1 se a reserva está confirmada e coincide com o período. Períodos
- * apenas encostados não coincidem. idIgnorado evita que uma reserva em edição
- * entre em conflito com ela mesma.
- */
+/* Períodos que apenas encostam não conflitam.
+ * idIgnorado evita que uma edição conflite com a própria reserva. */
 int ocupaPeriodo(Reserva *r, Data d, int inicio, int fim, int idIgnorado) {
     return r->id != idIgnorado && r->status == STATUS_CONFIRMADA &&
            dataInt(r->data) == dataInt(d) && r->inicioMin < fim && inicio < r->fimMin;
 }
 
-/* Retorna a posição da reserva que já ocupa o laboratório, ou -1 se estiver livre. */
 int conflitoLab(Sistema *s, int idLab, Data d, int inicio, int fim, int idIgnorado) {
     for (int i = 0; i < s->info.qtdReservas; i++) {
         if (s->reservas[i].idLaboratorio == idLab &&
@@ -663,11 +649,8 @@ int qtdNaReserva(Reserva *r, int idEquip) {
     return 0;
 }
 
-/*
- * Maior número de unidades em uso ao mesmo tempo durante o período. Somar as
- * reservas seria errado, pois aulas em sequência podem usar as mesmas unidades.
- * Por isso, o uso é calculado minuto a minuto, guardando o maior valor.
- */
+/* Calcula o maior uso simultâneo do equipamento durante o período.
+ * Somar todas as reservas seria incorreto quando seus horários são diferentes. */
 int usoMaximo(Sistema *s, int idEquip, Data d, int inicio, int fim, int idIgnorado) {
     int maior = 0;
 
@@ -695,7 +678,7 @@ int unidadesLivres(Sistema *s, Equipamento *e, Data d, int inicio, int fim, int 
     return livres;
 }
 
-/* Confere todas as regras e explica cada problema. Retorna 1 se a reserva é válida. */
+/* Centraliza a validação de horário, capacidade da sala e estoque disponível. */
 int validarReserva(Sistema *s, Reserva *r, int idIgnorado) {
     int posicaoLab = buscarLab(s, r->idLaboratorio);
     int posicaoConflito;
@@ -799,7 +782,6 @@ void listarLabs(Sistema *s) {
     }
 }
 
-/* Lista os laboratórios livres que comportam a turma. Retorna quantos exibiu. */
 int listarLabsLivres(Sistema *s, Data d, int inicio, int fim, int alunos, int idIgnorado) {
     int achados = 0;
 
@@ -856,7 +838,7 @@ void exibirDetalhes(Sistema *s, Reserva *r) {
            nomeDiaSemana(r->data), r->data.dia, r->data.mes, r->data.ano,
            r->inicioMin / 60, r->inicioMin % 60, r->fimMin / 60, r->fimMin % 60);
     printf("  Alunos    : %d\n", r->qtdAlunos);
-    if (r->id != 0) { /* Reserva sem ID ainda não foi confirmada. */
+    if (r->id != 0) { /* ID zero indica uma reserva ainda não cadastrada. */
         printf("  Situacao  : %s\n", textoStatus(r->status));
     }
     printf("  Equipamentos:");
@@ -870,7 +852,7 @@ void exibirDetalhes(Sistema *s, Reserva *r) {
     }
 }
 
-/* Busca um trecho ignorando diferenças entre letras ASCII maiúsculas e minúsculas. */
+/* Compara letras ASCII sem diferenciar maiúsculas e minúsculas; não trata acentos. */
 int contemTexto(char *texto, char *procurado) {
     for (int i = 0; texto[i] != '\0'; i++) {
         int j = 0;
@@ -896,7 +878,6 @@ int passaNoFiltro(Reserva *r, int filtro, Data d, char *texto) {
     return 1;
 }
 
-/* Compara reservas por data, horário e laboratório. */
 int vemAntes(Reserva *a, Reserva *b) {
     if (dataInt(a->data) != dataInt(b->data)) {
         return dataInt(a->data) < dataInt(b->data);
@@ -1004,7 +985,6 @@ void selecionarEquips(Sistema *s, Reserva *r, int idIgnorado) {
             printf("  Nao ha unidades livres nesse horario.\n");
             continue;
         }
-        /* Escolher novamente o mesmo equipamento permite ajustar a quantidade. */
         while (indice < r->qtdItens && r->itens[indice].idEquipamento != id) {
             indice++;
         }
@@ -1018,7 +998,7 @@ void selecionarEquips(Sistema *s, Reserva *r, int idIgnorado) {
     printf("  Limite de %d equipamentos por reserva atingido.\n", MAX_ITENS);
 }
 
-/* Copia a reserva para as semanas seguintes, pulando as que tiverem conflito. */
+/* Cada semana é validada separadamente; um conflito não bloqueia as demais. */
 void replicarSemanalmente(Sistema *s, Reserva base, int semanas) {
     int criadas = 0;
 
@@ -1087,7 +1067,7 @@ void criarReserva(Sistema *s) {
     semanas = lerInteiro("Repetir em quantas semanas seguintes (0 para nenhuma)? ",
                          0, MAX_SEMANAS_EXTRAS);
     if (semanas > 0) {
-        /* A reserva principal ja esta salva; só as copias semanais são desfeitas. */
+        /* Se a gravação falhar, desfaz só as cópias: a reserva original já está salva. */
         qtdAnterior = s->info.qtdReservas;
         proximoAnterior = s->info.proximoReserva;
         replicarSemanalmente(s, nova, semanas);
@@ -1109,7 +1089,7 @@ void consultarReserva(Sistema *s) {
     exibirDetalhes(s, &s->reservas[posicao]);
 }
 
-/* Retorna a posição da reserva, se estiver confirmada e não tiver começado; senão, -1. */
+/* Só permite alterar reservas confirmadas que ainda não começaram. */
 int escolherAlteravel(Sistema *s) {
     int posicao = buscarReserva(s, lerInteiro("ID da reserva: ", 1, MAX_ID));
 
@@ -1128,7 +1108,7 @@ int escolherAlteravel(Sistema *s) {
     return posicao;
 }
 
-/* Edita uma cópia; se a gravação falhar, restaura o registro original. */
+/* Edita uma cópia e só confirma as mudanças após validar e salvar. */
 void editarReserva(Sistema *s) {
     int posicao = escolherAlteravel(s);
     Reserva c, original;
@@ -1193,7 +1173,7 @@ void editarReserva(Sistema *s) {
     }
 }
 
-/* Cancelar libera o horário, mas mantém a reserva no histórico e no relatório. */
+/* Cancelar mantém o histórico e libera os recursos; excluir remove o registro. */
 void cancelarReserva(Sistema *s) {
     int posicao = escolherAlteravel(s);
 
@@ -1212,7 +1192,6 @@ void cancelarReserva(Sistema *s) {
     }
 }
 
-/* Excluir apaga a reserva do sistema, sem deixar registro. */
 void excluirReserva(Sistema *s) {
     int posicao = buscarReserva(s, lerInteiro("ID da reserva: ", 1, MAX_ID));
     Reserva removida;
