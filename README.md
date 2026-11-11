@@ -30,10 +30,9 @@ A aplicação funciona pelo terminal e utiliza arquivos binários para armazenar
 ### Reservas
 - Criação de reservas vinculadas a professores e disciplinas.
 - Seleção de laboratório e equipamentos.
-- Consulta, edição, cancelamento e exclusão de reservas.
+- Consulta, edição e exclusão de reservas.
 - Validação progressiva de data, turno, capacidade e disponibilidade dos laboratórios.
 - Repetição semanal com aviso das datas indisponíveis e confirmação única.
-- Histórico de reservas confirmadas e canceladas.
 
 ### Consultas e relatórios
 - Consulta da agenda diária.
@@ -84,7 +83,7 @@ O programa utiliza o arquivo `reservas_lab.dat` para armazenar os registros.
 
 Na primeira execução, alguns laboratórios e equipamentos de exemplo são cadastrados automaticamente.
 
-O formato de dados foi atualizado para a versão LAB2. Como o projeto ainda usa somente dados de teste, apague o arquivo `reservas_lab.dat` antigo antes de executar esta versão, se já tiver usado o programa anteriormente. O programa recriará os cadastros de exemplo. Arquivos `.tmp` e `.bak` são auxiliares do salvamento.
+O formato de dados foi atualizado para a versão LAB3. Como o projeto ainda usa somente dados de teste, apague o arquivo `reservas_lab.dat` antigo antes de executar esta versão, se já tiver usado o programa anteriormente. O programa recriará os cadastros de exemplo. Arquivos `.tmp` e `.bak` são auxiliares do salvamento.
 
 O arquivo de dados é criado no diretório de execução e não precisa ser enviado ao repositório.
 
