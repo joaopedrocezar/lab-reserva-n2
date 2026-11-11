@@ -245,13 +245,29 @@ void lerData(char *pergunta, Data *d) {
     }
 }
 
-void lerDataFutura(Data *d) {
+/* A data da reserva pode ser cancelada com 0 sem perder os demais campos. */
+int lerDataFutura(Data *d) {
+    char linha[32], sobra;
+    Data informada;
+
     while (1) {
-        lerData("Data (DD/MM/AAAA): ", d);
-        if (!dataJaPassou(*d)) {
-            return;
+        printf("Data (DD/MM/AAAA, 0 para voltar): ");
+        if (!lerLinha(linha, sizeof(linha))) {
+            continue;
         }
-        printf("  Nao e possivel reservar em uma data que ja passou.\n");
+        if (strcmp(linha, "0") == 0) {
+            return 0;
+        }
+        if (sscanf(linha, "%d/%d/%d%c", &informada.dia, &informada.mes,
+                   &informada.ano, &sobra) == 3 && dataValida(informada)) {
+            if (!dataJaPassou(informada)) {
+                *d = informada;
+                return 1;
+            }
+            printf("  Nao e possivel reservar em uma data que ja passou.\n");
+        } else {
+            printf("  Data invalida. Use o formato DD/MM/AAAA.\n");
+        }
     }
 }
 
@@ -733,13 +749,19 @@ void listarLabs(Sistema *s) {
     }
 }
 
+/* Uma unica regra de capacidade e ocupacao para listagens e escolhas. */
+int laboratorioDisponivel(Sistema *s, Laboratorio *l, Data d, int turno,
+                          int alunos, int idIgnorado) {
+    return l->capacidade >= alunos &&
+           conflitoLab(s, l->id, d, turno, idIgnorado) == -1;
+}
+
 int listarLabsLivres(Sistema *s, Data d, int turno, int alunos, int idIgnorado) {
     int achados = 0;
 
     imprimirTitulo("Laboratorios disponiveis");
     for (int i = 0; i < s->info.qtdLabs; i++) {
-        if (s->labs[i].capacidade >= alunos &&
-            conflitoLab(s, s->labs[i].id, d, turno, idIgnorado) == -1) {
+        if (laboratorioDisponivel(s, &s->labs[i], d, turno, alunos, idIgnorado)) {
             if (achados == 0) {
                 imprimirCabecalhoLabs();
             }
@@ -889,22 +911,18 @@ void listarReservas(Sistema *s, char *titulo, int filtro, Data d, char *texto) {
 int labsDisponiveis(Sistema *s, Data d, int turno, int alunos, int idIgnorado) {
     int total = 0;
     for (int i = 0; i < s->info.qtdLabs; i++) {
-        Laboratorio *l = &s->labs[i];
-        if (l->capacidade >= alunos &&
-            conflitoLab(s, l->id, d, turno, idIgnorado) == -1) {
+        if (laboratorioDisponivel(s, &s->labs[i], d, turno, alunos, idIgnorado)) {
             total++;
         }
     }
     return total;
 }
 
-int maiorCapacidade(Sistema *s, Data d, int turno, int livres) {
+int maiorCapacidade(Sistema *s) {
     int maior = 0;
     for (int i = 0; i < s->info.qtdLabs; i++) {
-        Laboratorio *l = &s->labs[i];
-        if ((!livres || conflitoLab(s, l->id, d, turno, 0) == -1) &&
-            l->capacidade > maior) {
-            maior = l->capacidade;
+        if (s->labs[i].capacidade > maior) {
+            maior = s->labs[i].capacidade;
         }
     }
     return maior;
@@ -933,12 +951,12 @@ int escolherLab(Sistema *s, Reserva *r, int idIgnorado) {
 }
 
 void explicarFaltaLab(Sistema *s, Data d, int turno, int alunos, int idIgnorado) {
-    int maiorTotal = maiorCapacidade(s, d, turno, 0);
+    int maiorTotal = maiorCapacidade(s);
     int maiorLivre = 0;
 
     for (int i = 0; i < s->info.qtdLabs; i++) {
         Laboratorio *l = &s->labs[i];
-        if (conflitoLab(s, l->id, d, turno, idIgnorado) == -1 &&
+        if (laboratorioDisponivel(s, l, d, turno, 0, idIgnorado) &&
             l->capacidade > maiorLivre) {
             maiorLivre = l->capacidade;
         }
@@ -961,7 +979,9 @@ int configurarDisponibilidade(Sistema *s, Reserva *r, int idIgnorado) {
     while (1) {
         if (etapa == 0) {
             int existe = 0;
-            lerDataFutura(&r->data);
+            if (!lerDataFutura(&r->data)) {
+                return 0;
+            }
             for (int turno = TURNO_MANHA; turno <= TURNO_NOITE; turno++) {
                 if (labsDisponiveis(s, r->data, turno, 0, idIgnorado) > 0) {
                     existe = 1;
@@ -999,7 +1019,7 @@ int configurarDisponibilidade(Sistema *s, Reserva *r, int idIgnorado) {
             r->qtdAlunos = lerInteiro("Quantidade de alunos: ", 1, MAX_ALUNOS);
             if (labsDisponiveis(s, r->data, r->turno, r->qtdAlunos, idIgnorado) == 0) {
                 explicarFaltaLab(s, r->data, r->turno, r->qtdAlunos, idIgnorado);
-                if (r->qtdAlunos > maiorCapacidade(s, r->data, r->turno, 0)) {
+                if (r->qtdAlunos > maiorCapacidade(s)) {
                     printf("1 - Alterar alunos\n0 - Cancelar\n");
                     if (lerInteiro("Opcao: ", 0, 1) == 0) {
                         return 0;
@@ -1031,24 +1051,41 @@ int configurarDisponibilidade(Sistema *s, Reserva *r, int idIgnorado) {
 }
 
 void selecionarEquips(Sistema *s, Reserva *r, int idIgnorado) {
-    if (!lerConfirmacao("Deseja reservar equipamentos?")) {
-        r->qtdItens = 0;
-        return;
-    }
-    r->qtdItens = 0;
     if (s->info.qtdEquips == 0) {
         printf("Nenhum equipamento cadastrado.\n");
         return;
     }
+    if (r->qtdItens > 0) {
+        printf("\nEquipamentos selecionados:\n");
+        for (int i = 0; i < r->qtdItens; i++) {
+            printf("  %dx %s\n", r->itens[i].quantidade,
+                   nomeEquip(s, r->itens[i].idEquipamento));
+        }
+        printf("1 - Alterar equipamentos\n2 - Remover todos\n0 - Manter atuais\n");
+        int opcao = lerInteiro("Opcao: ", 0, 2);
+        if (opcao == 0) return;
+        if (opcao == 2) {
+            r->qtdItens = 0;
+            return;
+        }
+    } else if (!lerConfirmacao("Deseja reservar equipamentos?")) {
+        return;
+    }
+
+    Reserva anterior = *r;
+    r->qtdItens = 0;
     listarEquipsLivres(s, r->data, r->turno, idIgnorado);
 
     while (r->qtdItens < MAX_ITENS) {
         char pergunta[64];
         int indice = 0;
-        int id = lerInteiro("ID do equipamento (0 para concluir): ", 0, MAX_ID);
-        if (id == 0) {
+        int id = lerInteiro("ID do equipamento (-1 cancelar, 0 concluir): ", -1, MAX_ID);
+        if (id == -1) {
+            *r = anterior;
+            printf("Alteracao de equipamentos descartada.\n");
             return;
         }
+        if (id == 0) return;
         int posicao = buscarEquip(s, id);
         if (posicao == -1) {
             printf("  Equipamento nao encontrado.\n");
@@ -1065,111 +1102,60 @@ void selecionarEquips(Sistema *s, Reserva *r, int idIgnorado) {
         sprintf(pergunta, "Quantidade (1 a %d): ", livres);
         r->itens[indice].idEquipamento = id;
         r->itens[indice].quantidade = lerInteiro(pergunta, 1, livres);
-        if (indice == r->qtdItens) {
-            r->qtdItens++;
-        }
+        if (indice == r->qtdItens) r->qtdItens++;
     }
     printf("Limite de %d tipos de equipamento atingido.\n", MAX_ITENS);
 }
 
-int equipamentosValidos(Sistema *s, Reserva *r, int idIgnorado) {
-    for (int i = 0; i < r->qtdItens; i++) {
-        int posicao = buscarEquip(s, r->itens[i].idEquipamento);
-        if (posicao == -1 ||
-            unidadesLivres(s, &s->equips[posicao], r->data, r->turno, idIgnorado) <
-            r->itens[i].quantidade) {
-            return 0;
-        }
-    }
-    return 1;
-}
-
-int ajustarLaboratorio(Sistema *s, Reserva *r, int idIgnorado) {
-    int posicao = buscarLab(s, r->idLaboratorio);
-    if (posicao != -1 &&
-        s->labs[posicao].capacidade >= r->qtdAlunos &&
-        conflitoLab(s, r->idLaboratorio, r->data, r->turno, idIgnorado) == -1) {
-        return 1;
-    }
-    if (labsDisponiveis(s, r->data, r->turno, r->qtdAlunos, idIgnorado) == 0) {
-        explicarFaltaLab(s, r->data, r->turno, r->qtdAlunos, idIgnorado);
-        return 0;
-    }
-    printf("O laboratorio anterior nao atende aos novos criterios. Escolha outro.\n");
-    listarLabsLivres(s, r->data, r->turno, r->qtdAlunos, idIgnorado);
-    return escolherLab(s, r, idIgnorado);
-}
-
-/* As alteracoes de data, turno e turma precisam preservar a disponibilidade. */
+/* Alteracoes podem ficar temporariamente inconsistentes; valida-se ao confirmar. */
 void alterarDadosReserva(Sistema *s, Reserva *r, int idIgnorado, int *semanas) {
-    Reserva anterior = *r;
-    int opcao;
-
     imprimirTitulo("Alterar dados");
     printf("1 - Data\n2 - Turno\n3 - Quantidade de alunos\n4 - Laboratorio\n");
     printf("5 - Professor e matricula\n6 - Disciplina\n7 - Equipamentos\n");
-    if (semanas != NULL) {
-        printf("8 - Repeticao semanal\n");
-    }
+    if (semanas != NULL) printf("8 - Repeticao semanal\n");
     printf("0 - Voltar ao resumo\n");
-    opcao = lerInteiro("Opcao: ", 0, semanas == NULL ? 7 : 8);
+    int opcao = lerInteiro("Opcao: ", 0, semanas == NULL ? 7 : 8);
 
     switch (opcao) {
     case 1:
         lerDataFutura(&r->data);
         break;
-    case 2:
-        r->turno = lerTurno();
-        if (r->turno == 0) {
-            *r = anterior;
-            return;
-        }
+    case 2: {
+        int turno = lerTurno();
+        if (turno != 0) r->turno = turno;
         break;
+    }
     case 3:
         r->qtdAlunos = lerInteiro("Quantidade de alunos: ", 1, MAX_ALUNOS);
         break;
-    case 4:
+    case 4: {
+        int labAnterior = r->idLaboratorio;
         if (labsDisponiveis(s, r->data, r->turno, r->qtdAlunos, idIgnorado) == 0) {
             explicarFaltaLab(s, r->data, r->turno, r->qtdAlunos, idIgnorado);
-            return;
+            break;
         }
         listarLabsLivres(s, r->data, r->turno, r->qtdAlunos, idIgnorado);
-        if (!escolherLab(s, r, idIgnorado)) {
-            *r = anterior;
-        }
-        return;
+        if (!escolherLab(s, r, idIgnorado)) r->idLaboratorio = labAnterior;
+        break;
+    }
     case 5:
         lerTexto("Nome do professor: ", r->professor, TAM_NOME);
         lerTexto("Matricula: ", r->matricula, TAM_CURTO);
-        return;
+        break;
     case 6:
         lerTexto("Disciplina: ", r->disciplina, TAM_NOME);
-        return;
+        break;
     case 7:
         selecionarEquips(s, r, idIgnorado);
-        return;
+        break;
     case 8:
-        if (semanas != NULL) {
+        if (semanas != NULL)
             *semanas = lerInteiro("Semanas seguintes (0 para nenhuma): ", 0, MAX_SEMANAS_EXTRAS);
-        }
-        return;
+        break;
     default:
         return;
     }
-    if (!ajustarLaboratorio(s, r, idIgnorado)) {
-        printf("Alteracao descartada. Dados anteriores mantidos.\n");
-        *r = anterior;
-        return;
-    }
-    if (!equipamentosValidos(s, r, idIgnorado)) {
-        printf("Os equipamentos escolhidos nao estao disponiveis no novo dia e turno.\n");
-        printf("1 - Escolher equipamentos novamente\n0 - Desfazer alteracao\n");
-        if (lerInteiro("Opcao: ", 0, 1) == 0) {
-            *r = anterior;
-            return;
-        }
-        selecionarEquips(s, r, idIgnorado);
-    }
+    /* Uma alteracao isolada pode conflitar; as demais ainda poderao corrigi-la. */
 }
 
 int semanaDisponivel(Sistema *s, Reserva *r, int mostrarMotivo) {
@@ -1196,11 +1182,18 @@ int semanaDisponivel(Sistema *s, Reserva *r, int mostrarMotivo) {
 }
 
 int mostrarSemanas(Sistema *s, Reserva base, int semanas) {
-    int aceitas = 1;
+    int aceitas = 0;
 
     printf("\nDatas da reserva:\n");
-    printf("%02d/%02d/%04d - Reserva original\n",
+    printf("%02d/%02d/%04d - Reserva original: ",
            base.data.dia, base.data.mes, base.data.ano);
+    if (!dataJaPassou(base.data) && semanaDisponivel(s, &base, 0)) {
+        printf("Disponivel\n");
+        aceitas++;
+    } else {
+        semanaDisponivel(s, &base, 1);
+        printf(" (corrija antes de confirmar)\n");
+    }
     for (int i = 1; i <= semanas; i++) {
         Reserva copia = base;
         copia.data = somarDias(base.data, 7 * i);
@@ -1212,7 +1205,7 @@ int mostrarSemanas(Sistema *s, Reserva base, int semanas) {
             printf(" (ignorada)\n");
         }
     }
-    printf("%d de %d datas poderao ser reservadas.\n", aceitas, semanas + 1);
+    printf("%d de %d datas disponiveis.\n", aceitas, semanas + 1);
     return aceitas;
 }
 
@@ -1273,8 +1266,13 @@ void criarReserva(Sistema *s) {
             printf("Nenhuma reserva foi gravada. Tente novamente.\n");
             continue;
         }
-        printf("%d reserva(s) confirmada(s), a partir do ID %d.\n",
-               criadas, proximoAnterior);
+        printf("%d reserva(s) confirmada(s):\n", criadas);
+        for (int i = qtdAnterior; i < s->info.qtdReservas; i++) {
+            Reserva *confirmada = &s->reservas[i];
+            printf("  Reserva %d - %02d/%02d/%04d (%s)\n",
+                   confirmada->id, confirmada->data.dia, confirmada->data.mes,
+                   confirmada->data.ano, nomeTurno(confirmada->turno));
+        }
         return;
     }
 }
