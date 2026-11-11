@@ -9,10 +9,10 @@
 #include <string.h>
 #include <time.h>
 
-#define ARQUIVO_DADOS      "reservas_lab.dat"
-#define ARQUIVO_TEMP       "reservas_lab.tmp"
-#define ARQUIVO_BACKUP     "reservas_lab.bak"
-#define ASSINATURA_ARQUIVO 0x4C414231
+#define ARQUIVO_DADOS      "reservas_lab.dat" /* guarda labs, equipamentos e reservas */
+#define ARQUIVO_TEMP       "reservas_lab.tmp" /* temporário, escrevemos nele antes de substituir o original */
+#define ARQUIVO_BACKUP     "reservas_lab.bak" /* backup usado durante a substituição */
+#define ASSINATURA_ARQUIVO 0x4C414231         /* assinatura para sabermos se é um arquivo do nosso sistema*/
 
 #define TAM_NOME           60
 #define TAM_CURTO          20
@@ -55,7 +55,7 @@ typedef struct {
     char          professor[TAM_NOME], matricula[TAM_CURTO], disciplina[TAM_NOME];
     int           idLaboratorio;
     Data          data;
-    int           inicioMin, fimMin; /* Em minutos desde a meia-noite */
+    int           inicioMin, fimMin;
     int           qtdAlunos;
     StatusReserva status;
     int           qtdItens;
@@ -68,7 +68,7 @@ typedef struct {
     int qtdLabs, qtdEquips, qtdReservas;
 } Cabecalho;
 
-/* O sistema e passado por ponteiro para as funcoes alterarem os cadastros. */
+/* O sistema é passado por ponteiro para as funções alterarem os cadastros. */
 typedef struct {
     Cabecalho    info;
     Laboratorio *labs;
