@@ -9,10 +9,10 @@
 #include <string.h>
 #include <time.h>
 
-#define ARQUIVO_DADOS      "reservas_lab.dat" /* guarda labs, equipamentos e reservas */
-#define ARQUIVO_TEMP       "reservas_lab.tmp" /* temporário, escrevemos nele antes de substituir o original */
-#define ARQUIVO_BACKUP     "reservas_lab.bak" /* backup usado durante a substituição */
-#define ASSINATURA_ARQUIVO 0x4C414231         /* assinatura para sabermos se é um arquivo do nosso sistema*/
+#define ARQUIVO_DADOS      "reservas_lab.dat"
+#define ARQUIVO_TEMP       "reservas_lab.tmp"
+#define ARQUIVO_BACKUP     "reservas_lab.bak"
+#define ASSINATURA_ARQUIVO 0x4C414231 /* Identifica o formato LAB1 do arquivo. */
 
 #define TAM_NOME           60
 #define TAM_CURTO          20
@@ -68,7 +68,7 @@ typedef struct {
     int qtdLabs, qtdEquips, qtdReservas;
 } Cabecalho;
 
-/* O sistema é passado por ponteiro para as funções alterarem os cadastros. */
+/* Reúne os cadastros e seus contadores, sem variáveis globais. */
 typedef struct {
     Cabecalho    info;
     Laboratorio *labs;
@@ -93,7 +93,7 @@ void aparar(char *texto) {
     memmove(texto, inicio, (size_t)(fim - inicio) + 1);
 }
 
-/* Devolve 0 quando a linha nao cabe no campo informado. */
+/* Devolve 0 quando a linha não cabe no campo informado. */
 int lerLinha(char *destino, int tamanho) {
     char *quebra;
 
@@ -142,7 +142,7 @@ int lerInteiro(char *pergunta, int minimo, int maximo) {
         if (!lerLinha(linha, 32)) {
             continue;
         }
-        /* %c detecta caracteres extras apos o numero. */
+        /* %c detecta caracteres extras após o numero. */
         if (sscanf(linha, "%9d%c", &valor, &sobra) == 1 &&
             valor >= minimo && valor <= maximo) {
             return valor;
@@ -299,7 +299,7 @@ void lerDataEPeriodo(Reserva *r) {
 
 /* Busca nos vetores */
 
-/* Os IDs sao usados nas reservas; a posicao no vetor pode mudar apos uma exclusao. */
+/* O ID identifica o registro mesmo que sua posição no vetor mude após uma exclusão. */
 int buscarLab(Sistema *s, int id) {
     for (int i = 0; i < s->info.qtdLabs; i++) {
         if (s->labs[i].id == id) {
@@ -347,7 +347,7 @@ char *nomeEquip(Sistema *s, int id) {
 
 /* Arquivo binário */
 
-/* Grava primeiro em um arquivo temporario para nao perder o arquivo anterior. */
+/* Grava primeiro em um arquivo temporário para preservar o arquivo anterior. */
 int salvarDados(Sistema *s) {
     FILE *f = fopen(ARQUIVO_TEMP, "wb");
     int ok = 1;
@@ -375,7 +375,7 @@ int salvarDados(Sistema *s) {
         return 0;
     }
 
-    /* Em alguns sistemas o rename nao substitui um arquivo existente. */
+    /* No Windows, rename não substitui diretamente um arquivo existente. */
     if (rename(ARQUIVO_TEMP, ARQUIVO_DADOS) != 0) {
         remove(ARQUIVO_BACKUP);
         if (rename(ARQUIVO_DADOS, ARQUIVO_BACKUP) != 0) {
@@ -405,7 +405,7 @@ int carregarDados(Sistema *s) {
             printf("Nao foi possivel abrir o arquivo de dados.\n");
             exit(1);
         }
-        /* Uma interrupcao durante a gravacao pode deixar o backup sem o arquivo principal. */
+        /* Se a substituição foi interrompida, restaura o arquivo anterior. */
         if (rename(ARQUIVO_BACKUP, ARQUIVO_DADOS) != 0) {
             if (errno != ENOENT) {
                 printf("Nao foi possivel restaurar o backup.\n");
@@ -540,17 +540,8 @@ int adicionarReserva(Sistema *s, Reserva nova) {
 }
 
 /*
- * Remocao e restauracao de itens dos vetores.
- *
- * Toda alteracao e feita primeiro na memoria e depois gravada com salvarDados.
- * Se a gravacao falhar, a alteracao precisa ser desfeita; caso contrario, a
- * tela mostraria um dado que o arquivo nao tem, e a proxima gravacao bem-
- * sucedida salvaria sem aviso uma operacao que o usuario viu falhar.
- *
- * As funcoes "remover" deslocam os itens seguintes e devolvem o item removido.
- * As funcoes "restaurar" fazem o caminho inverso, recolocando o item na mesma
- * posicao. Nao e preciso realocar: remover diminui apenas o contador, entao o
- * espaco do item continua reservado no vetor.
+ * Desfaz alterações na memória quando a gravação falha.
+ * A remoção preserva o espaço alocado para restaurar o item na mesma posição.
  */
 Reserva removerReserva(Sistema *s, int posicao) {
     Reserva removida = s->reservas[posicao];
@@ -607,8 +598,8 @@ void restaurarEquip(Sistema *s, int posicao, Equipamento removido) {
 }
 
 /*
- * Desfaz inclusoes recentes de reservas: volta o contador e o proximo ID ao
- * estado anterior. Funciona porque novas reservas sempre entram no fim do vetor.
+ * Restaura a contagem e o próximo ID após falha ao salvar novas reservas.
+ * Isso funciona porque as inclusões são feitas no fim do vetor.
  */
 void desfazerInclusaoReservas(Sistema *s, int qtdAnterior, int proximoAnterior) {
     s->info.qtdReservas = qtdAnterior;
@@ -865,7 +856,7 @@ void exibirDetalhes(Sistema *s, Reserva *r) {
            nomeDiaSemana(r->data), r->data.dia, r->data.mes, r->data.ano,
            r->inicioMin / 60, r->inicioMin % 60, r->fimMin / 60, r->fimMin % 60);
     printf("  Alunos    : %d\n", r->qtdAlunos);
-    if (r->id != 0) { /* Reserva sem ID ainda nao foi confirmada. */
+    if (r->id != 0) { /* Reserva sem ID ainda não foi confirmada. */
         printf("  Situacao  : %s\n", textoStatus(r->status));
     }
     printf("  Equipamentos:");
@@ -879,7 +870,7 @@ void exibirDetalhes(Sistema *s, Reserva *r) {
     }
 }
 
-/* Procura um texto dentro de outro, sem diferenciar maiúsculas de minúsculas. */
+/* Busca um trecho ignorando diferenças entre letras ASCII maiúsculas e minúsculas. */
 int contemTexto(char *texto, char *procurado) {
     for (int i = 0; texto[i] != '\0'; i++) {
         int j = 0;
@@ -905,7 +896,7 @@ int passaNoFiltro(Reserva *r, int filtro, Data d, char *texto) {
     return 1;
 }
 
-/* Retorna 1 se a reserva a deve aparecer antes da b: data, horário e laboratório. */
+/* Compara reservas por data, horário e laboratório. */
 int vemAntes(Reserva *a, Reserva *b) {
     if (dataInt(a->data) != dataInt(b->data)) {
         return dataInt(a->data) < dataInt(b->data);
@@ -917,7 +908,7 @@ int vemAntes(Reserva *a, Reserva *b) {
 }
 
 void listarReservas(Sistema *s, char *titulo, int filtro, Data d, char *texto) {
-    int *lista = malloc((size_t)(s->info.qtdReservas + 1) * sizeof(int)); /* Indices selecionados */
+    int *lista = malloc((size_t)(s->info.qtdReservas + 1) * sizeof(int));
     int quantidade = 0;
 
     imprimirTitulo(titulo);
@@ -937,7 +928,7 @@ void listarReservas(Sistema *s, char *titulo, int filtro, Data d, char *texto) {
         return;
     }
 
-    /* Ordena os indices, sem mudar a ordem das reservas armazenadas. */
+    /* Ordena os índices, sem mudar a ordem das reservas armazenadas. */
     for (int i = 0; i < quantidade - 1; i++) {
         for (int j = 0; j < quantidade - 1 - i; j++) {
             if (vemAntes(&s->reservas[lista[j + 1]], &s->reservas[lista[j]])) {
@@ -986,7 +977,7 @@ int escolherLab(Sistema *s, Reserva *r, int idIgnorado) {
     }
 }
 
-/* Os equipamentos sao do estoque comum, mesmo quando as aulas sao em labs diferentes. */
+/* O estoque de equipamentos é compartilhado entre os laboratórios. */
 void selecionarEquips(Sistema *s, Reserva *r, int idIgnorado) {
     r->qtdItens = 0;
     if (s->info.qtdEquips == 0 || !lerConfirmacao("Deseja reservar equipamentos?")) {
@@ -1013,7 +1004,7 @@ void selecionarEquips(Sistema *s, Reserva *r, int idIgnorado) {
             printf("  Nao ha unidades livres nesse horario.\n");
             continue;
         }
-        /* Pedir o mesmo equipamento de novo corrige a quantidade anterior */
+        /* Escolher novamente o mesmo equipamento permite ajustar a quantidade. */
         while (indice < r->qtdItens && r->itens[indice].idEquipamento != id) {
             indice++;
         }
@@ -1096,7 +1087,7 @@ void criarReserva(Sistema *s) {
     semanas = lerInteiro("Repetir em quantas semanas seguintes (0 para nenhuma)? ",
                          0, MAX_SEMANAS_EXTRAS);
     if (semanas > 0) {
-        /* A reserva principal ja esta salva; so as copias semanais sao desfeitas. */
+        /* A reserva principal ja esta salva; só as copias semanais são desfeitas. */
         qtdAnterior = s->info.qtdReservas;
         proximoAnterior = s->info.proximoReserva;
         replicarSemanalmente(s, nova, semanas);
@@ -1137,7 +1128,7 @@ int escolherAlteravel(Sistema *s) {
     return posicao;
 }
 
-/* Altera uma cópia; o original só muda ao salvar com todas as regras atendidas. */
+/* Edita uma cópia; se a gravação falhar, restaura o registro original. */
 void editarReserva(Sistema *s) {
     int posicao = escolherAlteravel(s);
     Reserva c, original;
@@ -1192,7 +1183,6 @@ void editarReserva(Sistema *s) {
                 printf("Reserva atualizada.\n");
                 return;
             }
-            /* Mantem a versao original e deixa o usuario tentar de novo. */
             s->reservas[posicao] = original;
             printf("Alteracoes nao salvas. Tente novamente ou descarte.\n");
             break;
@@ -1216,7 +1206,7 @@ void cancelarReserva(Sistema *s) {
         if (salvarDados(s)) {
             printf("Reserva cancelada. O horario foi liberado.\n");
         } else {
-            s->reservas[posicao].status = STATUS_CONFIRMADA; /* Desfaz na memoria */
+            s->reservas[posicao].status = STATUS_CONFIRMADA;
             printf("Cancelamento nao realizado.\n");
         }
     }
@@ -1258,7 +1248,6 @@ void criarLab(Sistema *s) {
     if (salvarDados(s)) {
         printf("Laboratorio cadastrado.\n");
     } else {
-        /* O novo laboratorio e o ultimo do vetor e recebeu o ultimo ID. */
         s->info.qtdLabs--;
         s->info.proximoLab--;
         printf("Cadastro nao realizado.\n");
@@ -1277,7 +1266,7 @@ void editarLab(Sistema *s) {
         return;
     }
     l = &s->labs[posicao];
-    original = *l; /* Copia para desfazer a edicao se a gravacao falhar */
+    original = *l;
 
     for (int i = 0; i < s->info.qtdReservas; i++) {
         Reserva *r = &s->reservas[i];
@@ -1340,7 +1329,6 @@ void criarEquip(Sistema *s) {
     if (salvarDados(s)) {
         printf("Equipamento cadastrado.\n");
     } else {
-        /* O novo equipamento e o ultimo do vetor e recebeu o ultimo ID. */
         s->info.qtdEquips--;
         s->info.proximoEquip--;
         printf("Cadastro nao realizado.\n");
@@ -1359,7 +1347,7 @@ void editarEquip(Sistema *s) {
         return;
     }
     e = &s->equips[posicao];
-    original = *e; /* Copia para desfazer a edicao se a gravacao falhar */
+    original = *e;
 
     for (int i = 0; i < s->info.qtdReservas; i++) {
         Reserva *r = &s->reservas[i];
