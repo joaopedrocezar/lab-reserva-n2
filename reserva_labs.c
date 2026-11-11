@@ -62,13 +62,11 @@ typedef struct {
     ItemReserva   itens[MAX_ITENS];
 } Reserva;
 
-/* Cabeçalho do arquivo: assinatura, contagens e próximos IDs. */
 typedef struct {
     int assinatura, proximoLab, proximoEquip, proximoReserva;
     int qtdLabs, qtdEquips, qtdReservas;
 } Cabecalho;
 
-/* Reúne os cadastros em vetores dinâmicos, sem variáveis globais. */
 typedef struct {
     Cabecalho    info;
     Laboratorio *labs;
@@ -187,7 +185,6 @@ int dataValida(Data d) {
            d.dia >= 1 && d.dia <= diasNoMes(d.mes, d.ano);
 }
 
-/* Representa a data como AAAAMMDD para comparar datas como inteiros. */
 int dataInt(Data d) {
     return d.ano * 10000 + d.mes * 100 + d.dia;
 }
@@ -496,7 +493,6 @@ int carregarDados(Sistema *s) {
     return 1;
 }
 
-/* Cadastros em vetores dinâmicos, ampliados com realloc. */
 
 void erroMemoria(void) {
     printf("Erro: memoria insuficiente.\n");
@@ -678,7 +674,6 @@ int unidadesLivres(Sistema *s, Equipamento *e, Data d, int inicio, int fim, int 
     return livres;
 }
 
-/* Centraliza a validação de horário, capacidade da sala e estoque disponível. */
 int validarReserva(Sistema *s, Reserva *r, int idIgnorado) {
     int posicaoLab = buscarLab(s, r->idLaboratorio);
     int posicaoConflito;
@@ -1108,7 +1103,6 @@ int escolherAlteravel(Sistema *s) {
     return posicao;
 }
 
-/* Edita uma cópia e só confirma as mudanças após validar e salvar. */
 void editarReserva(Sistema *s) {
     int posicao = escolherAlteravel(s);
     Reserva c, original;
