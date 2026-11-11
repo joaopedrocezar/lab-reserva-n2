@@ -1348,65 +1348,37 @@ int escolherAlteravel(Sistema *s) {
 
 void editarReserva(Sistema *s) {
     int posicao = escolherAlteravel(s);
-    Reserva c, original;
+    Reserva alterada, original;
 
     if (posicao == -1) {
         return;
     }
-    c = s->reservas[posicao];
-
+    alterada = s->reservas[posicao];
     while (1) {
         imprimirTitulo("Editar reserva");
-        exibirDetalhes(s, &c);
-        printf("\n1 - Professor e matricula\n");
-        printf("2 - Disciplina\n");
-        printf("3 - Data e horario\n");
-        printf("4 - Quantidade de alunos\n");
-        printf("5 - Laboratorio\n");
-        printf("6 - Equipamentos\n");
-        printf("7 - Salvar alteracoes\n");
-        printf("0 - Descartar alteracoes\n");
-
-        switch (lerInteiro("Opcao: ", 0, 7)) {
-        case 1:
-            lerTexto("Nome do professor: ", c.professor, TAM_NOME);
-            lerTexto("Matricula: ", c.matricula, TAM_CURTO);
-            break;
-        case 2:
-            lerTexto("Disciplina: ", c.disciplina, TAM_NOME);
-            break;
-        case 3:
-            lerDataEPeriodo(&c);
-            break;
-        case 4:
-            c.qtdAlunos = lerInteiro("Quantidade de alunos: ", 1, MAX_ALUNOS);
-            break;
-        case 5:
-            if (listarLabsLivres(s, c.data, c.inicioMin, c.fimMin, c.qtdAlunos, c.id) > 0) {
-                escolherLab(s, &c, c.id);
-            }
-            break;
-        case 6:
-            selecionarEquips(s, &c, c.id);
-            break;
-        case 7:
-            if (!validarReserva(s, &c, c.id)) {
-                printf("Corrija os problemas acima antes de salvar.\n");
-                break;
-            }
-            original = s->reservas[posicao];
-            s->reservas[posicao] = c;
-            if (salvarDados(s)) {
-                printf("Reserva atualizada.\n");
-                return;
-            }
-            s->reservas[posicao] = original;
-            printf("Alteracoes nao salvas. Tente novamente ou descarte.\n");
-            break;
-        default:
+        exibirDetalhes(s, &alterada);
+        printf("\n1 - Salvar alteracoes\n2 - Alterar dados\n0 - Descartar\n");
+        int opcao = lerInteiro("Opcao: ", 0, 2);
+        if (opcao == 0) {
             printf("Alteracoes descartadas.\n");
             return;
         }
+        if (opcao == 2) {
+            alterarDadosReserva(s, &alterada, alterada.id, NULL);
+            continue;
+        }
+        if (!validarReserva(s, &alterada, alterada.id)) {
+            printf("Corrija os problemas antes de salvar.\n");
+            continue;
+        }
+        original = s->reservas[posicao];
+        s->reservas[posicao] = alterada;
+        if (salvarDados(s)) {
+            printf("Reserva atualizada.\n");
+            return;
+        }
+        s->reservas[posicao] = original;
+        printf("Alteracoes nao salvas. Tente novamente ou descarte.\n");
     }
 }
 
@@ -1632,7 +1604,24 @@ void exibirAgendaDoDia(Sistema *s) {
 
     lerData("Data (DD/MM/AAAA): ", &d);
     sprintf(titulo, "Agenda de %s, %02d/%02d/%04d", nomeDiaSemana(d), d.dia, d.mes, d.ano);
-    listarReservas(s, titulo, FILTRO_DATA, d, "");
+    imprimirTitulo(titulo);
+    for (int turno = TURNO_MANHA; turno <= TURNO_NOITE; turno++) {
+        int achadas = 0;
+        imprimirTitulo(nomeTurno(turno));
+        for (int i = 0; i < s->info.qtdReservas; i++) {
+            Reserva *r = &s->reservas[i];
+            if (r->status == STATUS_CONFIRMADA && dataInt(r->data) == dataInt(d) &&
+                r->turno == turno) {
+                printf("  %-22.22s - %-20.20s (%s, %d alunos)\n",
+                       nomeLab(s, r->idLaboratorio), r->professor,
+                       r->disciplina, r->qtdAlunos);
+                achadas++;
+            }
+        }
+        if (achadas == 0) {
+            printf("  Nenhuma reserva.\n");
+        }
+    }
 }
 
 void buscarPorProfessor(Sistema *s) {
