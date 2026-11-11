@@ -7,7 +7,7 @@ Sistema de gerenciamento de reservas de laboratórios e equipamentos acadêmicos
 
 O LabReserva foi desenvolvido para auxiliar no gerenciamento de laboratórios e equipamentos de uma instituição de ensino.
 
-O sistema permite cadastrar recursos, organizar reservas e consultar a disponibilidade de laboratórios e equipamentos em diferentes datas e horários.
+O sistema permite cadastrar recursos, organizar reservas e consultar a disponibilidade de laboratórios e equipamentos em diferentes datas e turnos (manhã, tarde e noite).
 
 A aplicação funciona pelo terminal e utiliza arquivos binários para armazenar os dados entre as execuções.
 
@@ -17,22 +17,22 @@ A aplicação funciona pelo terminal e utiliza arquivos binários para armazenar
 - Cadastro de laboratórios com nome, bloco, tipo e capacidade.
 - Listagem dos laboratórios cadastrados.
 - Edição e exclusão de registros.
-- Consulta de disponibilidade por data e horário.
+- Consulta de disponibilidade por data e turno.
 - Verificação de conflitos entre reservas.
 
 ### Equipamentos
 - Cadastro de equipamentos com nome, categoria e quantidade.
 - Listagem, edição e exclusão de equipamentos.
 - Controle de estoque compartilhado entre laboratórios.
-- Consulta da quantidade disponível em determinado período.
-- Validação de disponibilidade considerando reservas simultâneas.
+- Consulta da quantidade disponível em determinada data e turno.
+- Validação do estoque compartilhado entre reservas do mesmo turno.
 
 ### Reservas
 - Criação de reservas vinculadas a professores e disciplinas.
 - Seleção de laboratório e equipamentos.
 - Consulta, edição, cancelamento e exclusão de reservas.
-- Validação de datas, horários e capacidade dos laboratórios.
-- Repetição de reservas em semanas seguintes.
+- Validação progressiva de data, turno, capacidade e disponibilidade dos laboratórios.
+- Repetição semanal com aviso das datas indisponíveis e confirmação única.
 - Histórico de reservas confirmadas e canceladas.
 
 ### Consultas e relatórios
@@ -84,14 +84,17 @@ O programa utiliza o arquivo `reservas_lab.dat` para armazenar os registros.
 
 Na primeira execução, alguns laboratórios e equipamentos de exemplo são cadastrados automaticamente.
 
+O formato de dados foi atualizado para a versão LAB2. Como o projeto ainda usa somente dados de teste, apague o arquivo `reservas_lab.dat` antigo antes de executar esta versão, se já tiver usado o programa anteriormente. O programa recriará os cadastros de exemplo. Arquivos `.tmp` e `.bak` são auxiliares do salvamento.
+
 O arquivo de dados é criado no diretório de execução e não precisa ser enviado ao repositório.
 
 ## Estrutura do projeto
 
 ```text
-lab-reserva/
+lab-reserva-n2/
 ├── reserva_labs.c
 ├── README.md
+├── .github/workflows/validate-labreserva.yml
 └── .gitignore
 ```
 
@@ -99,7 +102,7 @@ lab-reserva/
 
 O projeto está em desenvolvimento e poderá receber ajustes nas funcionalidades e na organização do código.
 
-Uma das melhorias previstas é permitir reservas independentes de laboratórios e equipamentos, incluindo solicitações que utilizem somente equipamentos.
+A reserva sempre inclui um laboratório; a solicitação de equipamentos é opcional.
 
 ## Contexto acadêmico
 
