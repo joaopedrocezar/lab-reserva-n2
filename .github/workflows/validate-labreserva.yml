@@ -180,3 +180,5 @@ jobs:
 
           print("All shift-based reservation scenarios passed")
           PY
+      - name: Simulate full terminal sessions (22 scenarios)
+        run: python3 -m unittest discover -s tests -p 'test_cli_flows.py' -v
