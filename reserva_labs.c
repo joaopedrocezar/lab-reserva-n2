@@ -12,7 +12,7 @@
 #define ARQUIVO_DADOS      "reservas_lab.dat"
 #define ARQUIVO_TEMP       "reservas_lab.tmp"
 #define ARQUIVO_BACKUP     "reservas_lab.bak"
-#define ASSINATURA_ARQUIVO 0x4C414232 /* Identifica o formato LAB2 do arquivo. */
+#define ASSINATURA_ARQUIVO 0x4C414233 /* Identifica o formato LAB3 do arquivo. */
 
 #define TAM_NOME           60
 #define TAM_CURTO          20
@@ -32,8 +32,6 @@
 typedef struct {
     int dia, mes, ano;
 } Data;
-
-typedef enum { STATUS_CONFIRMADA = 1, STATUS_CANCELADA = 2 } StatusReserva;
 
 typedef struct {
     int idEquipamento, quantidade;
@@ -58,7 +56,6 @@ typedef struct {
     Data          data;
     int           turno;
     int           qtdAlunos;
-    StatusReserva status;
     int           qtdItens;
     ItemReserva   itens[MAX_ITENS];
 } Reserva;
@@ -245,7 +242,7 @@ void lerData(char *pergunta, Data *d) {
     }
 }
 
-/* A data da reserva pode ser cancelada com 0 sem perder os demais campos. */
+/* A entrada da data pode ser interrompida com 0 sem perder os demais campos. */
 int lerDataFutura(Data *d) {
     char linha[32], sobra;
     Data informada;
@@ -463,8 +460,7 @@ int carregarDados(Sistema *s) {
         for (int i = 0; i < s->info.qtdReservas; i++) {
             Reserva *r = &s->reservas[i];
             if (r->qtdItens < 0 || r->qtdItens > MAX_ITENS || !dataValida(r->data) ||
-                r->turno < TURNO_MANHA || r->turno > TURNO_NOITE || r->qtdAlunos < 1 || r->qtdAlunos > MAX_ALUNOS ||
-                (r->status != STATUS_CONFIRMADA && r->status != STATUS_CANCELADA)) {
+                r->turno < TURNO_MANHA || r->turno > TURNO_NOITE || r->qtdAlunos < 1 || r->qtdAlunos > MAX_ALUNOS) {
                 ok = 0;
                 break;
             }
@@ -523,7 +519,6 @@ int adicionarReserva(Sistema *s, Reserva nova) {
     }
     s->reservas = aumentado;
     nova.id = s->info.proximoReserva++;
-    nova.status = STATUS_CONFIRMADA;
     s->reservas[s->info.qtdReservas++] = nova;
     return nova.id;
 }
@@ -618,7 +613,7 @@ void cadastrarDadosIniciais(Sistema *s) {
 
 /* O idIgnorado evita que uma reserva em edição conflite com ela mesma. */
 int ocupaTurno(Reserva *r, Data d, int turno, int idIgnorado) {
-    return r->id != idIgnorado && r->status == STATUS_CONFIRMADA &&
+    return r->id != idIgnorado &&
            dataInt(r->data) == dataInt(d) && r->turno == turno;
 }
 
@@ -712,7 +707,7 @@ int validarReserva(Sistema *s, Reserva *r, int idIgnorado) {
 }
 
 int reservaFutura(Reserva *r) {
-    return r->status == STATUS_CONFIRMADA && !dataJaPassou(r->data);
+    return !dataJaPassou(r->data);
 }
 
 /* Exibição */
@@ -721,12 +716,7 @@ void imprimirTitulo(char *titulo) {
     printf("\n=== %s ===\n", titulo);
 }
 
-char *textoStatus(StatusReserva status) {
-    if (status == STATUS_CONFIRMADA) {
-        return "Confirmada";
-    }
-    return "Cancelada";
-}
+
 
 void imprimirCabecalhoLabs(void) {
     printf("%-4s %-28s %-7s %-20s %s\n", "ID", "Nome", "Bloco", "Tipo", "Capacidade");
@@ -811,9 +801,6 @@ void exibirDetalhes(Sistema *s, Reserva *r) {
            nomeDiaSemana(r->data), r->data.dia, r->data.mes, r->data.ano);
     printf("  Turno     : %s\n", nomeTurno(r->turno));
     printf("  Alunos    : %d\n", r->qtdAlunos);
-    if (r->id != 0) {
-        printf("  Situacao  : %s\n", textoStatus(r->status));
-    }
     printf("  Equipamentos:");
     if (r->qtdItens == 0) {
         printf(" nenhum");
@@ -843,7 +830,7 @@ int contemTexto(char *texto, char *procurado) {
 
 int passaNoFiltro(Reserva *r, int filtro, Data d, char *texto) {
     if (filtro == FILTRO_DATA) {
-        return r->status == STATUS_CONFIRMADA && dataInt(r->data) == dataInt(d);
+        return dataInt(r->data) == dataInt(d);
     }
     if (filtro == FILTRO_PROFESSOR) {
         return contemTexto(r->professor, texto) || contemTexto(r->matricula, texto);
@@ -893,15 +880,15 @@ void listarReservas(Sistema *s, char *titulo, int filtro, Data d, char *texto) {
         }
     }
 
-    printf("%-4s %-10s %-8s %-20s %-20s %-18s %-6s %s\n", "ID", "Data", "Turno",
-           "Laboratorio", "Professor", "Disciplina", "Alunos", "Situacao");
+    printf("%-4s %-10s %-8s %-20s %-20s %-18s %s\n", "ID", "Data", "Turno",
+           "Laboratorio", "Professor", "Disciplina", "Alunos");
     for (int i = 0; i < quantidade; i++) {
         Reserva *r = &s->reservas[lista[i]];
 
-        printf("%-4d %02d/%02d/%04d %-8s %-20.20s %-20.20s %-18.18s %-6d %s\n",
+        printf("%-4d %02d/%02d/%04d %-8s %-20.20s %-20.20s %-18.18s %d\n",
                r->id, r->data.dia, r->data.mes, r->data.ano,
                nomeTurno(r->turno), nomeLab(s, r->idLaboratorio), r->professor,
-               r->disciplina, r->qtdAlunos, textoStatus(r->status));
+               r->disciplina, r->qtdAlunos);
     }
     free(lista);
 }
@@ -1217,10 +1204,9 @@ void criarReserva(Sistema *s) {
         printf("Cadastre um laboratorio antes de fazer reservas.\n");
         return;
     }
-    nova.status = STATUS_CONFIRMADA;
     imprimirTitulo("Nova reserva");
     if (!configurarDisponibilidade(s, &nova, 0)) {
-        printf("Reserva cancelada.\n");
+        printf("Cadastro interrompido.\n");
         return;
     }
     imprimirTitulo("Dados do responsavel");
@@ -1288,15 +1274,11 @@ void consultarReserva(Sistema *s) {
     exibirDetalhes(s, &s->reservas[posicao]);
 }
 
-/* Só permite alterar reservas confirmadas que ainda não começaram. */
+/* Só permite editar reservas de datas que ainda não passaram. */
 int escolherAlteravel(Sistema *s) {
     int posicao = buscarReserva(s, lerInteiro("ID da reserva: ", 1, MAX_ID));
     if (posicao == -1) {
         printf("Reserva nao encontrada.\n");
-        return -1;
-    }
-    if (s->reservas[posicao].status == STATUS_CANCELADA) {
-        printf("Esta reserva ja foi cancelada.\n");
         return -1;
     }
     if (dataJaPassou(s->reservas[posicao].data)) {
@@ -1342,24 +1324,7 @@ void editarReserva(Sistema *s) {
     }
 }
 
-/* Cancelar mantém o histórico e libera os recursos; excluir remove o registro. */
-void cancelarReserva(Sistema *s) {
-    int posicao = escolherAlteravel(s);
 
-    if (posicao == -1) {
-        return;
-    }
-    exibirDetalhes(s, &s->reservas[posicao]);
-    if (lerConfirmacao("Cancelar esta reserva?")) {
-        s->reservas[posicao].status = STATUS_CANCELADA;
-        if (salvarDados(s)) {
-            printf("Reserva cancelada. O turno foi liberado.\n");
-        } else {
-            s->reservas[posicao].status = STATUS_CONFIRMADA;
-            printf("Cancelamento nao realizado.\n");
-        }
-    }
-}
 
 void excluirReserva(Sistema *s) {
     int posicao = buscarReserva(s, lerInteiro("ID da reserva: ", 1, MAX_ID));
@@ -1570,7 +1535,7 @@ void exibirAgendaDoDia(Sistema *s) {
         imprimirTitulo(nomeTurno(turno));
         for (int i = 0; i < s->info.qtdReservas; i++) {
             Reserva *r = &s->reservas[i];
-            if (r->status == STATUS_CONFIRMADA && dataInt(r->data) == dataInt(d) &&
+            if (dataInt(r->data) == dataInt(d) &&
                 r->turno == turno) {
                 printf("  %-22.22s - %-20.20s (%s, %d alunos)\n",
                        nomeLab(s, r->idLaboratorio), r->professor,
@@ -1607,7 +1572,6 @@ void consultarDisponibilidade(Sistema *s) {
 }
 
 void exibirRelatorio(Sistema *s) {
-    int confirmadas = 0, canceladas = 0;
     int *turnos = calloc((size_t)s->info.qtdLabs + 1, sizeof(int));
     int *unidades = calloc((size_t)s->info.qtdEquips + 1, sizeof(int));
 
@@ -1620,11 +1584,6 @@ void exibirRelatorio(Sistema *s) {
     for (int i = 0; i < s->info.qtdReservas; i++) {
         Reserva *r = &s->reservas[i];
 
-        if (r->status != STATUS_CONFIRMADA) {
-            canceladas++;
-            continue;
-        }
-        confirmadas++;
         int posLab = buscarLab(s, r->idLaboratorio);
         if (posLab != -1) {
             turnos[posLab]++;
@@ -1638,8 +1597,7 @@ void exibirRelatorio(Sistema *s) {
     }
 
     imprimirTitulo("Relatorio de uso");
-    printf("Reservas confirmadas: %d\n", confirmadas);
-    printf("Reservas canceladas : %d\n", canceladas);
+    printf("Total de reservas: %d\n", s->info.qtdReservas);
 
     imprimirTitulo("Turnos reservados por laboratorio");
     for (int i = 0; i < s->info.qtdLabs; i++) {
@@ -1662,17 +1620,15 @@ void menuReservas(Sistema *s) {
         printf("2 - Listar reservas\n");
         printf("3 - Consultar reserva\n");
         printf("4 - Editar reserva\n");
-        printf("5 - Cancelar reserva\n");
-        printf("6 - Excluir reserva\n");
+        printf("5 - Excluir reserva\n");
         printf("0 - Voltar\n");
 
-        switch (lerInteiro("Opcao: ", 0, 6)) {
+        switch (lerInteiro("Opcao: ", 0, 5)) {
         case 1: criarReserva(s); break;
         case 2: listarTodasReservas(s); break;
         case 3: consultarReserva(s); break;
         case 4: editarReserva(s); break;
-        case 5: cancelarReserva(s); break;
-        case 6: excluirReserva(s); break;
+        case 5: excluirReserva(s); break;
         default: return;
         }
     }
